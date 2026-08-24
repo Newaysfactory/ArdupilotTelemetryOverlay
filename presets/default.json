@@ -1,0 +1,177 @@
+{
+  "version": 1,
+  "name": "osd-default",
+  "theme": {
+    "name": "osd",
+    "font_family": "Consolas",
+    "font_weight": 700,
+    "value_size": 0.034,
+    "label_size": 0.018,
+    "unit_size": 0.016,
+    "message_size": 0.022,
+    "value_color": "#FFFFFFFF",
+    "label_color": "#B4C8D2FF",
+    "unit_color": "#8CA0AAFF",
+    "message_color": "#FFE680FF",
+    "warn_color": "#FF6E5AFF",
+    "no_data_color": "#FFFFFF73",
+    "outline_width": 0.06,
+    "outline_color": "#000000C8",
+    "plate_color": "",
+    "plate_padding": 0.25,
+    "horizon_color": "#00FF87FF",
+    "horizon_line_width": 0.0025,
+    "horizon_ladder_color": "#00FF87E6",
+    "horizon_sky_color": "",
+    "horizon_ground_color": "",
+    "horizon_reference_color": "#FFD400FF"
+  },
+  "messages": {
+    "max_lines": 3,
+    "min_duration": 1.0,
+    "duration": 4.0,
+    "skip_before_arm": true,
+    "exclude": []
+  },
+  "sampling": {
+    "max_gap": 1.0,
+    "hysteresis": {
+      "agl": 0.3
+    }
+  },
+  "elements": [
+    {
+      "type": "readout",
+      "id": "voltage",
+      "x": 0.03,
+      "y": 0.055,
+      "anchor": "top-left",
+      "unit": "V",
+      "options": {
+        "channel": "voltage",
+        "label": "BAT",
+        "digits": 2,
+        "warn_below": 10.6
+      }
+    },
+    {
+      "type": "timer",
+      "id": "timer",
+      "x": 0.97,
+      "y": 0.055,
+      "anchor": "top-right",
+      "options": {
+        "label": "T"
+      }
+    },
+    {
+      "type": "heading",
+      "id": "heading",
+      "x": 0.5,
+      "y": 0.055,
+      "anchor": "top-center"
+    },
+    {
+      "type": "readout",
+      "id": "ias",
+      "x": 0.03,
+      "y": 0.44,
+      "anchor": "center-left",
+      "unit": "km/h",
+      "options": {
+        "channel": "ias",
+        "label": "IAS"
+      }
+    },
+    {
+      "type": "readout",
+      "id": "gs",
+      "x": 0.03,
+      "y": 0.53,
+      "anchor": "center-left",
+      "unit": "km/h",
+      "options": {
+        "channel": "gs",
+        "label": "GS"
+      }
+    },
+    {
+      "type": "readout",
+      "id": "alt",
+      "x": 0.97,
+      "y": 0.44,
+      "anchor": "center-right",
+      "unit": "m",
+      "options": {
+        "channel": "alt",
+        "label": "ALT"
+      }
+    },
+    {
+      "type": "readout",
+      "id": "agl",
+      "x": 0.97,
+      "y": 0.53,
+      "anchor": "center-right",
+      "unit": "m",
+      "options": {
+        "channel": "agl",
+        "label": "AGL",
+        "digits": 2,
+        "no_data_text": "NO AGL",
+        "no_data_hides_label": true
+      },
+      "decimals": 1
+    },
+    {
+      "type": "readout",
+      "id": "vs",
+      "x": 0.97,
+      "y": 0.62,
+      "anchor": "center-right",
+      "unit": "m/s_v",
+      "options": {
+        "channel": "vs",
+        "label": "VS",
+        "digits": 2,
+        "signed": true
+      },
+      "decimals": 1
+    },
+    {
+      "type": "horizon",
+      "id": "horizon",
+      "x": 0.5,
+      "y": 0.5,
+      "anchor": "center",
+      "options": {
+        "size": 0.32,
+        "aspect": 0.5,
+        "degrees_visible": 40,
+        "ladder_step": 10,
+        "ladder_range": 40
+      }
+    },
+    {
+      "type": "mode",
+      "id": "mode",
+      "x": 0.5,
+      "y": 0.86,
+      "anchor": "bottom-center",
+      "options": {
+        "width_chars": 8
+      }
+    },
+    {
+      "type": "messages",
+      "id": "messages",
+      "x": 0.5,
+      "y": 0.96,
+      "anchor": "bottom-center",
+      "options": {
+        "lines": 3,
+        "width": 0.7
+      }
+    }
+  ]
+}
