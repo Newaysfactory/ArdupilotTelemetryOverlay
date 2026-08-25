@@ -126,7 +126,7 @@ def _creation_time(container: av.container.InputContainer) -> dt.datetime | None
 
     Worth reporting but not worth trusting for synchronisation: action cameras
     routinely record a wrong clock (the sample clip is stamped over a year off), which
-    is why the sync offset is user-supplied.
+    is why the log delay is user-supplied.
     """
     raw = (container.metadata or {}).get("creation_time")
     if not raw:

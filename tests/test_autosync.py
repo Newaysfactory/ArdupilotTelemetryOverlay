@@ -69,7 +69,7 @@ class TestCorrelate:
         video_rate = np.interp(true_offset + video_times, t, log_rate)
 
         result = _correlate(video_rate, info, channel, AutoSyncOptions(), window, 0)
-        assert result.offset == pytest.approx(true_offset, abs=0.1)
+        assert result.log_delay == pytest.approx(true_offset, abs=0.1)
         assert result.correlation > 0.9
         assert result.trustworthy
 
@@ -93,7 +93,7 @@ class TestCorrelate:
 
         options = AutoSyncOptions(start=start, window=window)
         result = _correlate(video_rate, info, channel, options, window, 0)
-        assert result.offset == pytest.approx(true_offset, abs=0.2)
+        assert result.log_delay == pytest.approx(true_offset, abs=0.2)
 
     def test_flat_signal_is_rejected_not_guessed(self):
         info = fake_info()
@@ -124,7 +124,7 @@ class TestCorrelate:
 
         options = AutoSyncOptions(search_min=60.0, search_max=80.0)
         result = _correlate(video_rate, info, channel, options, 30.0, 0)
-        assert 60.0 <= result.offset <= 80.0
+        assert 60.0 <= result.log_delay <= 80.0
         # Forced away from the true peak, the result must not claim to be reliable.
         assert not result.trustworthy
 

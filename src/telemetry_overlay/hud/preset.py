@@ -1,7 +1,7 @@
 """The overlay preset: which elements exist, where they sit, how they look.
 
 A preset is deliberately independent of any particular flight -- it holds layout, theme
-and units only. The video/log pair and the time offset live in a separate sync file, so
+and units only. The video/log pair and the log delay live in a separate sync file, so
 one preset can be reused across every flight.
 
 Positions are normalised to the frame (0..1) and sizes are fractions of frame height,

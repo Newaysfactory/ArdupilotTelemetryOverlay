@@ -61,9 +61,9 @@ def build_parser() -> argparse.ArgumentParser:
     frame.set_defaults(func=cmd_frame)
 
     autosync = subparsers.add_parser(
-        "autosync", help="suggest a sync offset by correlating image and log roll rate"
+        "autosync", help="suggest a log delay by correlating image and log roll rate"
     )
-    _add_common(autosync, with_offset=False)
+    _add_common(autosync, with_log_delay=False)
     autosync.add_argument(
         "--from", dest="start", type=float, default=0.0, help="video time to start at"
     )
@@ -92,9 +92,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     manualsync = subparsers.add_parser(
         "manualsync",
-        help="plot a chosen offset against video/log roll, to check it by eye",
+        help="plot a chosen log delay against video/log roll, to check it by eye",
     )
-    _add_common(manualsync, with_offset=False)
+    _add_common(manualsync, with_log_delay=False)
     manualsync.add_argument(
         "--from", dest="start", type=float, required=True, help="video start time, s"
     )
@@ -102,7 +102,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--to", dest="end", type=float, required=True, help="video end time, s"
     )
     manualsync.add_argument(
-        "--offset", type=float, required=True, help="log_time = offset + video_time"
+        "--log-delay",
+        dest="log_delay",
+        type=float,
+        required=True,
+        help="log_time = log_delay + video_time",
     )
     manualsync.add_argument(
         "--plot",
@@ -139,7 +143,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _add_common(parser: argparse.ArgumentParser, *, with_offset: bool = True) -> None:
+def _add_common(parser: argparse.ArgumentParser, *, with_log_delay: bool = True) -> None:
     parser.add_argument("video", type=Path)
     parser.add_argument("log", type=Path)
     parser.add_argument(
@@ -149,9 +153,10 @@ def _add_common(parser: argparse.ArgumentParser, *, with_offset: bool = True) ->
         default=DEFAULT_PRESET,
         help=f"overlay preset (default: {DEFAULT_PRESET.name})",
     )
-    if with_offset:
+    if with_log_delay:
         parser.add_argument(
-            "--offset",
+            "--log-delay",
+            dest="log_delay",
             type=float,
             help="log time matching video time zero, in seconds; "
             "defaults to the video's .sync.json, else 0",
@@ -159,7 +164,7 @@ def _add_common(parser: argparse.ArgumentParser, *, with_offset: bool = True) ->
         parser.add_argument(
             "--save-sync",
             action="store_true",
-            help="store the offset in the video's .sync.json",
+            help="store the log delay in the video's .sync.json",
         )
 
 
@@ -217,7 +222,7 @@ def _print_log_report(log: TelemetryLog, video_duration: float) -> None:
     usable = log.duration - video_duration
     if usable > 0:
         print(
-            f"  the clip fits inside the log: valid offsets run from "
+            f"  the clip fits inside the log: valid log delays run from "
             f"{log.t_start:.1f} to {log.t_start + usable:.1f}"
         )
     else:
@@ -295,7 +300,7 @@ def cmd_frame(args: argparse.Namespace) -> int:
 
 
 def cmd_autosync(args: argparse.Namespace) -> int:
-    from .autosync import AutoSyncOptions, estimate_offset
+    from .autosync import AutoSyncOptions, estimate_log_delay
     from .video.probe import probe_video
 
     info = probe_video(args.video)
@@ -312,7 +317,7 @@ def cmd_autosync(args: argparse.Namespace) -> int:
         f"analysing {options.window:.0f}s of video from {options.start:.0f}s "
         "(optical flow vs logged roll rate)..."
     )
-    result = estimate_offset(
+    result = estimate_log_delay(
         args.video,
         log,
         options,
@@ -322,7 +327,7 @@ def cmd_autosync(args: argparse.Namespace) -> int:
     print()
     if result.warning:
         print(f"  warning: {result.warning}")
-    print(f"  estimated offset : {result.offset:.3f} s")
+    print(f"  estimated log delay: {result.log_delay:.3f} s")
     print(f"  correlation      : {result.correlation:.3f} (1.0 = perfect)")
     print(f"  peak distinctness: {result.confidence:.2f}x the runner-up")
     print(f"  analysed         : {result.analysed:.1f}s, {result.samples} frame pairs")
@@ -332,10 +337,10 @@ def cmd_autosync(args: argparse.Namespace) -> int:
     )
     print(
         f"\n  verify with: telemetry-overlay frame {args.video} {args.log} "
-        f"--offset {result.offset:.3f} --at {args.start + 5:.0f}"
+        f"--log-delay {result.log_delay:.3f} --at {args.start + 5:.0f}"
     )
     if args.write:
-        sync = SyncModel(offset=result.offset, note="autosync")
+        sync = SyncModel(log_delay=result.log_delay, note="autosync")
         path = sync.save(SyncModel.path_for(args.video))
         print(f"  written to {path}")
     if args.plot:
@@ -344,7 +349,7 @@ def cmd_autosync(args: argparse.Namespace) -> int:
         if result.diagnostics is None:
             print("  no plot: the estimate failed before the signals were computed")
         else:
-            path = save_diagnostic_plots(result.diagnostics, result.offset, args.plot)
+            path = save_diagnostic_plots(result.diagnostics, result.log_delay, args.plot)
             print(f"  plot written to {path}")
     return 0
 
@@ -365,10 +370,10 @@ def cmd_manualsync(args: argparse.Namespace) -> int:
         progress=lambda f: _progress_bar("  tracking", f),
     )
     print()
-    xlim = (args.offset + args.start, args.offset + args.end)
+    xlim = (args.log_delay + args.start, args.log_delay + args.end)
     path = save_diagnostic_plots(
         diagnostics,
-        args.offset,
+        args.log_delay,
         args.plot,
         filename="manualsync_diagnostics.png",
         xlim=xlim,
@@ -397,7 +402,7 @@ def cmd_export(args: argparse.Namespace) -> int:
         overwrite=args.overwrite,
     )
     print(f"{args.video.name} + {args.log.name} -> {output}")
-    print(f"  offset {sync.offset:+.3f}s   preset {Path(args.preset).name}")
+    print(f"  log delay {sync.log_delay:+.3f}s   preset {Path(args.preset).name}")
 
     result = export_video(
         args.video,
@@ -439,27 +444,27 @@ def _timeline(info, log, preset, sync):
     return build_timeline(
         log,
         video_times,
-        sync.offset + video_times * sync.scale,
+        sync.log_delay + video_times * sync.scale,
         options=preset.sampling,
         message_track=MessageTrack.from_log(log, preset.messages),
     )
 
 
 def _resolve_sync(args: argparse.Namespace, video: Path) -> SyncModel:
-    """Command line offset wins, then the companion sync file, then zero."""
-    if getattr(args, "offset", None) is not None:
-        sync = SyncModel(offset=args.offset, note="command line")
+    """Command line log delay wins, then the companion sync file, then zero."""
+    if getattr(args, "log_delay", None) is not None:
+        sync = SyncModel(log_delay=args.log_delay, note="command line")
     else:
         existing = SyncModel.load_for(video)
         if existing is not None:
             sync = existing
-            _note(f"using offset {sync.offset:+.3f}s from {existing.source}")
+            _note(f"using log delay {sync.log_delay:+.3f}s from {existing.source}")
         else:
             sync = SyncModel()
-            _note("no offset given and no .sync.json found: using 0")
+            _note("no log delay given and no .sync.json found: using 0")
     if getattr(args, "save_sync", False):
         path = sync.save(SyncModel.path_for(video))
-        _note(f"saved offset to {path}")
+        _note(f"saved log delay to {path}")
     return sync
 
 

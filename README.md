@@ -88,16 +88,16 @@ Write down three things from the output:
 - the **video duration** (sample: `224.8s`);
 - the **log window**, in flight-controller seconds (sample: `171.7s -> 640.6s`) and the
   arming time (`181.8s`);
-- the line `valid offsets run from 171.7 to 415.9` — any offset outside that range would
+- the line `valid log delays run from 171.7 to 415.9` — any log delay outside that range would
   place part of the clip outside the log, so it is wrong by definition.
 
 Also check that every channel you care about was found, and that an encoder is marked
 `yes`. On a machine without an NVIDIA GPU only the software encoders will be available;
 that is fine, just slower.
 
-### Step 2 — get a rough offset
+### Step 2 — get a rough log delay
 
-The offset is the log time that corresponds to **video time zero**. Do not compute it
+The log delay is the log time that corresponds to **video time zero**. Do not compute it
 from file timestamps: the camera clock is unreliable. Instead pick one event you can see
 in the video *and* find in the log, and subtract.
 
@@ -105,13 +105,13 @@ The easiest event is the start of the takeoff roll. Say it happens 40 s into the
 and the log shows the AUTO takeoff at 215 s:
 
 ```
-offset = 215 - 40 = 175
+log_delay = 215 - 40 = 175
 ```
 
 If you cannot spot such an event, let `autosync` propose a starting point — it is a
 suggestion, never the answer. It never writes anything unless you pass `--write`, so
 there is no "with/without saving" distinction here — a plain run and a `--write` run are
-shown in [its reference entry](#autosync--suggest-a-time-offset):
+shown in [its reference entry](#autosync--suggest-a-log-delay):
 
 ```bash
 telemetry-overlay autosync flight.MP4 flight.bin --from 60 --to 120 \
@@ -124,70 +124,74 @@ telemetry-overlay autosync "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin
 ```
 
 Pass `--from`/`--to` a stretch of video with real turns in it, and bound the search
-with the offset range `probe` printed. Read the confidence score: a low one means the
+with the log delay range `probe` printed. Read the confidence score: a low one means the
 footage did not correlate, not that the number is nearly right.
 
-### Step 3 — refine the offset frame by frame
+### Step 3 — refine the log delay frame by frame
 
-Render single frames at a moment whose true state you know, and adjust the offset until
+Render single frames at a moment whose true state you know, and adjust the log delay until
 the overlay agrees with the picture. At this point there is nothing saved yet, so
-`--offset` is always explicit:
+`--log-delay` is always explicit:
 
 ```bash
-telemetry-overlay frame flight.MP4 flight.bin --at 40 --offset 175 -o out/f.png
+telemetry-overlay frame flight.MP4 flight.bin --at 40 --log-delay 175 -o out/f.png
 ```
 
 ```powershell
 telemetry-overlay frame "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
-    --at 40 --offset 175 -o out\f.png
+    --at 40 --log-delay 175 -o out\f.png
 ```
 
 Look at the frame, then correct. The relationship is worth internalising:
 
 - overlay is **ahead** of the picture (already climbing while the aircraft is still on
-  the ground) → **lower** the offset;
-- overlay **lags** the picture → **raise** the offset.
+  the ground) → **lower** the log delay;
+- overlay **lags** the picture → **raise** the log delay.
+
+Counter-intuitive but follows from `log_time = log_delay + video_time * scale`: raising the
+log delay makes a *later* log time line up with the *same* video time, so every log event
+shifts **earlier** in the video, not later — that is what fixes the overlay lagging.
 
 Iterate in shrinking steps — ±5 s, then ±1 s, then ±0.2 s. The horizon is the most
 sensitive check: at a sharp roll, an error of half a second is obvious. Speed and altitude
 change too slowly to sync against.
 
 ```bash
-telemetry-overlay frame flight.MP4 flight.bin --at 40 --offset 173 -o out/f.png
-telemetry-overlay frame flight.MP4 flight.bin --at 40 --offset 171.8 -o out/f.png
+telemetry-overlay frame flight.MP4 flight.bin --at 40 --log-delay 173 -o out/f.png
+telemetry-overlay frame flight.MP4 flight.bin --at 40 --log-delay 171.8 -o out/f.png
 ```
 
 ```powershell
 telemetry-overlay frame "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
-    --at 40 --offset 173 -o out\f.png
+    --at 40 --log-delay 173 -o out\f.png
 telemetry-overlay frame "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
-    --at 40 --offset 171.8 -o out\f.png
+    --at 40 --log-delay 171.8 -o out\f.png
 ```
 
 Then verify at a *second*, distant moment — the landing, for instance. If the first point
 matches and a point four minutes later does not, the two clocks are drifting, which is
 what the `scale` field in the sync file is for.
 
-### Step 4 — save the offset
+### Step 4 — save the log delay
 
 Once you are happy, store it beside the video by adding `--save-sync` to the last `frame`
 call — no need to run it again separately:
 
 ```bash
-telemetry-overlay frame flight.MP4 flight.bin --at 40 --offset 171.8 --save-sync
+telemetry-overlay frame flight.MP4 flight.bin --at 40 --log-delay 171.8 --save-sync
 ```
 
 ```powershell
 telemetry-overlay frame "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
-    --at 40 --offset 171.8 --save-sync
+    --at 40 --log-delay 171.8 --save-sync
 ```
 
 That writes `flight.sync.json` (`data\ThumbPW_0024.sync.json` for the sample — next to
 the **video**, regardless of the log's name). From now on every command below can either
-omit `--offset` and let it read that file back, or keep passing `--offset` explicitly —
+omit `--log-delay` and let it read that file back, or keep passing `--log-delay` explicitly —
 useful if you never want to save anything and prefer to type the number every time (e.g.
-scripting, or comparing two candidate offsets side by side). This step is optional: if
-you skip it, repeat `--offset 171.8` on every command in steps 5-7 below.
+scripting, or comparing two candidate log delays side by side). This step is optional: if
+you skip it, repeat `--log-delay 171.8` on every command in steps 5-7 below.
 
 ### Step 5 — adjust the look
 
@@ -198,18 +202,18 @@ render, no export needed):
 cp presets/default.json presets/mine.json
 ```
 
-Without a saved offset:
+Without a saved log delay:
 
 ```bash
-telemetry-overlay frame flight.MP4 flight.bin --at 120 --offset 171.8 -p presets/mine.json -o out/f.png
+telemetry-overlay frame flight.MP4 flight.bin --at 120 --log-delay 171.8 -p presets/mine.json -o out/f.png
 ```
 
 ```powershell
 telemetry-overlay frame "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
-    --at 120 --offset 171.8 -p presets\mine.json -o out\f.png
+    --at 120 --log-delay 171.8 -p presets\mine.json -o out\f.png
 ```
 
-With the offset saved in step 4 (omit `--offset`, it is read from `.sync.json`):
+With the log delay saved in step 4 (omit `--log-delay`, it is read from `.sync.json`):
 
 ```bash
 telemetry-overlay frame flight.MP4 flight.bin --at 120 -p presets/mine.json -o out/f.png
@@ -228,19 +232,19 @@ work on is one where the aircraft is banked and messages are on screen.
 
 Never go straight to the full clip. Render ten seconds first.
 
-Without a saved offset:
+Without a saved log delay:
 
 ```bash
-telemetry-overlay export flight.MP4 flight.bin --offset 171.8 -p presets/mine.json \
+telemetry-overlay export flight.MP4 flight.bin --log-delay 171.8 -p presets/mine.json \
     --from 210 --to 220 -o out/test.mp4
 ```
 
 ```powershell
 telemetry-overlay export "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
-    --offset 171.8 -p presets\mine.json --from 210 --to 220 -o out\test.mp4
+    --log-delay 171.8 -p presets\mine.json --from 210 --to 220 -o out\test.mp4
 ```
 
-With the offset saved in step 4:
+With the log delay saved in step 4:
 
 ```bash
 telemetry-overlay export flight.MP4 flight.bin -p presets/mine.json \
@@ -257,18 +261,18 @@ the audio is in place, and that nothing is clipped at the frame edges.
 
 ### Step 7 — export the whole flight
 
-Without a saved offset:
+Without a saved log delay:
 
 ```bash
-telemetry-overlay export flight.MP4 flight.bin --offset 171.8 -p presets/mine.json -o flight_hud.mp4
+telemetry-overlay export flight.MP4 flight.bin --log-delay 171.8 -p presets/mine.json -o flight_hud.mp4
 ```
 
 ```powershell
 telemetry-overlay export "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
-    --offset 171.8 -p presets\mine.json -o flight_hud.mp4
+    --log-delay 171.8 -p presets\mine.json -o flight_hud.mp4
 ```
 
-With the offset saved in step 4:
+With the log delay saved in step 4:
 
 ```bash
 telemetry-overlay export flight.MP4 flight.bin -p presets/mine.json -o flight_hud.mp4
@@ -294,10 +298,10 @@ sit before the subcommand name: `--version` prints the package version, and
 
 - `-p`, `--preset PATH` — the layout/theme/units file to render with (default:
   `presets/default.json`). See [Presets](#presets).
-- `--offset SECONDS` — log time matching video time zero (`frame` and `export` only;
+- `--log-delay SECONDS` — log time matching video time zero (`frame` and `export` only;
   `autosync` computes it instead of taking it). Defaults to the value stored in the
   video's `.sync.json`, or `0` if there is none.
-- `--save-sync` — write the offset in effect (whether given on the command line or read
+- `--save-sync` — write the log delay in effect (whether given on the command line or read
   from an existing `.sync.json`) to `<video>.sync.json` (`frame` and `export` only).
 
 ### `probe` — see what you have
@@ -331,7 +335,7 @@ Renders one composited frame to a PNG in about a second. This is the fast loop f
 adjusting a preset, with no GUI and no waiting for an export.
 
 ```
-telemetry-overlay frame <video> <log> [-p PRESET] [--offset SECONDS] [--save-sync]
+telemetry-overlay frame <video> <log> [-p PRESET] [--log-delay SECONDS] [--save-sync]
     [--at SECONDS] [-o PATH] [--width PIXELS] [--overlay-only]
 ```
 
@@ -345,19 +349,19 @@ telemetry-overlay frame <video> <log> [-p PRESET] [--offset SECONDS] [--save-syn
   you later wanted to composite in an external editor).
 
 ```bash
-telemetry-overlay frame flight.MP4 flight.bin --at 42 --offset 250 -o out/f.png
+telemetry-overlay frame flight.MP4 flight.bin --at 42 --log-delay 250 -o out/f.png
 telemetry-overlay frame flight.MP4 flight.bin --at 42 --overlay-only   # HUD alone
 telemetry-overlay frame flight.MP4 flight.bin --at 42 --width 960 -o out/preview.png
 ```
 
-Against the sample data, using the offset found in the [tutorial](#step-4--save-the-offset):
+Against the sample data, using the log delay found in the [tutorial](#step-4--save-the-log-delay):
 
 ```powershell
 telemetry-overlay frame "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
-    --at 40 --offset 171.8 -o out\f.png
+    --at 40 --log-delay 171.8 -o out\f.png
 ```
 
-### `autosync` — suggest a time offset
+### `autosync` — suggest a log delay
 
 Measures how fast the image rotates (optical flow) and correlates it with the roll rate
 in the log. It prints an estimate and a confidence score and changes nothing unless you
@@ -374,13 +378,13 @@ telemetry-overlay autosync <video> <log> [-p PRESET]
   the estimate itself.
 - `--from SECONDS` — video time the analysed slice starts at (default `0`).
 - `--to SECONDS` — video time the analysed slice ends at (default: 60 s after `--from`).
-- `--search-min` / `--search-max SECONDS` — bound the offset the estimate is allowed to
+- `--search-min` / `--search-max SECONDS` — bound the log delay the estimate is allowed to
   return, in **log** seconds.
 - `--write` — store the accepted estimate in `<video>.sync.json`. Without it, `autosync`
   only prints the suggestion; nothing is ever written automatically.
 - `--plot DIR` — save `autosync_diagnostics.png` to `DIR`: a top panel with the log's
   roll, and a bottom panel overlaying the log's roll rate with the video's optical-flow
-  roll rate, the video trace shifted by the estimated offset so the two lines line up
+  roll rate, the video trace shifted by the estimated log delay so the two lines line up
   the way the estimate claims. Use it to see by eye why a correlation is weak — e.g. no
   rotation signal in the chosen video slice, a flat stretch of the log, or two shapes
   that clearly do not match despite the shift.
@@ -392,7 +396,7 @@ Pick a stretch with actual turns in it: skip the taxi and the climb-out, and kee
 slice long enough to contain several manoeuvres.
 
 `--search-min`/`--search-max` restrict the answer instead of the input — useful when
-`probe` already told you the log window, since an offset outside it cannot be right:
+`probe` already told you the log window, since a log delay outside it cannot be right:
 
 ```bash
 telemetry-overlay autosync flight.MP4 flight.bin --from 30 --to 90 \
@@ -411,33 +415,33 @@ It needs visible, textured ground and real manoeuvring. Footage of empty sky, st
 and level flight, or a gimballed camera will not correlate; that is what the confidence
 score is for. Always verify with `frame` before trusting it.
 
-### `manualsync` — check a chosen offset by eye
+### `manualsync` — check a chosen log delay by eye
 
 Plots a specific video slice's optical-flow roll rate against the log's roll and roll
-rate, shifted by an offset you already picked (by hand, or from `autosync`). Unlike
+rate, shifted by a log delay you already picked (by hand, or from `autosync`). Unlike
 `autosync` it does not search for anything; it just draws the two panel diagnostic plot
 for that one slice so you can see whether the two traces actually line up.
 
 ```
 telemetry-overlay manualsync <video> <log> [-p PRESET]
-    --from SECONDS --to SECONDS --offset SECONDS [--plot DIR]
+    --from SECONDS --to SECONDS --log-delay SECONDS [--plot DIR]
 ```
 
 - `video`, `log` — required positionals.
 - `-p`, `--preset PATH` — accepted for consistency with the other commands but unused.
 - `--from` / `--to SECONDS` — the video slice to analyse, in video seconds.
-- `--offset SECONDS` — the offset to check: `log_time = offset + video_time`.
+- `--log-delay SECONDS` — the log delay to check: `log_time = log_delay + video_time`.
 - `--plot DIR` — directory to save `manualsync_diagnostics.png` in (default: `out`).
 
 ```powershell
 telemetry-overlay manualsync "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
-    --from 60 --to 90 --offset 206.1
+    --from 60 --to 90 --log-delay 206.1
 ```
 
 ### `export` — write the final video
 
 ```
-telemetry-overlay export <video> <log> [-p PRESET] [--offset SECONDS] [--save-sync]
+telemetry-overlay export <video> <log> [-p PRESET] [--log-delay SECONDS] [--save-sync]
     [-o PATH] [--from SECONDS] [--to SECONDS]
     [--encoder KEY] [--quality N] [--scale FACTOR] [--no-audio] [-y]
 ```
@@ -452,7 +456,7 @@ telemetry-overlay export <video> <log> [-p PRESET] [--offset SECONDS] [--save-sy
 - `--quality N` — CQ (NVENC) or CRF (x264/x265) value; lower is higher quality and a
   larger file. Default depends on the chosen encoder.
 - `--scale FACTOR` — downscale the output by this factor (e.g. `0.5` for half
-  resolution) for a fast draft export while iterating on a preset or a sync offset. The
+  resolution) for a fast draft export while iterating on a preset or a sync log delay. The
   HUD is unaffected: element geometry is frame-relative, so it renders correctly at any
   size. Default: 1.0, the source resolution.
 - `--no-audio` — drop the audio track instead of copying it untouched.
@@ -461,11 +465,11 @@ telemetry-overlay export <video> <log> [-p PRESET] [--offset SECONDS] [--save-sy
 
 ```bash
 # 10-second test segment first: seconds instead of minutes, and half resolution for speed
-telemetry-overlay export flight.MP4 flight.bin --offset 250 --from 100 --to 110 \
+telemetry-overlay export flight.MP4 flight.bin --log-delay 250 --from 100 --to 110 \
     --scale 0.5
 
 # then the whole clip at full resolution, with an explicit encoder and quality
-telemetry-overlay export flight.MP4 flight.bin --offset 250 \
+telemetry-overlay export flight.MP4 flight.bin --log-delay 250 \
     --encoder x264 --quality 20 -o flight_hud.mp4 -y
 ```
 
@@ -473,36 +477,36 @@ Against the sample data, a 10-second test segment starting at the AUTO takeoff:
 
 ```powershell
 telemetry-overlay export "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
-    --offset 171.8 --from 40 --to 50 -o out\test.mp4
+    --log-delay 171.8 --from 40 --to 50 -o out\test.mp4
 ```
 
 ## Synchronising video and telemetry
 
 The camera clock cannot be trusted — on real footage the MP4 creation time can be off by
-more than a year — so the alignment is an explicit **offset**: the log time, in seconds,
+more than a year — so the alignment is an explicit **log delay**: the log time, in seconds,
 that corresponds to video time zero.
 
 ```
-log_time = offset + video_time
+log_time = log_delay + video_time
 ```
 
-**Raising the offset moves the telemetry later in the log for the same point in the
+**Raising the log delay moves the telemetry later in the log for the same point in the
 video** — video time zero is matched against a log time further into the flight, so
 what the overlay shows advances (it looks *ahead* of the picture, e.g. already climbing
-while the aircraft is still on the ground on screen). **Lowering the offset** matches
+while the aircraft is still on the ground on screen). **Lowering the log delay** matches
 video time zero against an earlier log time, so the overlay shows something that
 happened earlier (it *lags* the picture). To fix a mismatch: overlay ahead of the
-picture → lower the offset; overlay lagging the picture → raise it.
+picture → lower the log delay; overlay lagging the picture → raise it.
 
 Find it by rendering frames around a recognisable event (the moment of rotation on
 takeoff, a sharp roll, touchdown) and adjusting until the overlay matches the picture.
-`probe` prints the range of offsets for which the clip fits inside the log.
+`probe` prints the range of log delays for which the clip fits inside the log.
 
 Store it next to the video with `--save-sync`, which writes `flight.sync.json`; later
-commands pick it up automatically when `--offset` is omitted.
+commands pick it up automatically when `--log-delay` is omitted.
 
-The offset lives apart from the preset on purpose: a preset describes a *look* and is
-reused across flights, while an offset belongs to one video/log pair.
+The log delay lives apart from the preset on purpose: a preset describes a *look* and is
+reused across flights, while a log delay belongs to one video/log pair.
 
 ## Presets
 
@@ -582,4 +586,4 @@ editor. Exporting the HUD alone to a file with an alpha channel is not implement
 The suite covers interpolation at the edges of the log window, gap handling, the
 rangefinder validity hysteresis, the message queue (using timings taken from a real
 log), unit conversions, preset round-trips, band geometry, and the sync
-cross-correlation against signals with a known offset.
+cross-correlation against signals with a known log delay.

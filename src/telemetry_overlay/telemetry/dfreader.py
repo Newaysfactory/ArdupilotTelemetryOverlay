@@ -7,7 +7,7 @@ export or tweaking the layout then costs nothing.
 
 Time base: log time is ``TimeUS`` in seconds, i.e. time since the flight controller
 booted. It is monotonic and independent of GPS lock, which makes it the right reference
-for a video offset.
+for a video log delay.
 """
 
 from __future__ import annotations

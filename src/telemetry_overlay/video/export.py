@@ -268,7 +268,7 @@ def _build_timeline(
     info: VideoInfo, telemetry: TelemetryLog, preset: Preset, sync: SyncModel
 ):
     video_times = info.frame_times()
-    log_times = sync.offset + video_times * sync.scale
+    log_times = sync.log_delay + video_times * sync.scale
     return build_timeline(
         telemetry,
         video_times,

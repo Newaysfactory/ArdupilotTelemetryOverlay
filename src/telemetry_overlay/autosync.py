@@ -1,9 +1,9 @@
-"""Estimate the video/log time offset automatically.
+"""Estimate the video/log time log delay automatically.
 
-The camera clock is unreliable, so the offset normally comes from the user. This module
-offers a starting guess instead: it measures how fast the *image* rotates (optical flow
-between consecutive frames) and cross-correlates that with the roll rate the flight
-controller recorded. The lag of the correlation peak is the offset.
+The camera clock is unreliable, so the log delay normally comes from the user. This
+module offers a starting guess instead: it measures how fast the *image* rotates
+(optical flow between consecutive frames) and cross-correlates that with the roll rate
+the flight controller recorded. The lag of the correlation peak is the log delay.
 
 It is a suggestion, never applied on its own. Cases where it fails are real and easy to
 hit: footage of empty sky has nothing to track, straight and level flight has no signal
@@ -40,7 +40,7 @@ class AutoSyncDiagnostics:
 
 @dataclass
 class AutoSyncResult:
-    offset: float
+    log_delay: float
     #: Peak-to-runner-up ratio of the correlation. Above ~1.5 the peak is distinct;
     #: near 1.0 the correlation is flat and the answer is meaningless.
     confidence: float
@@ -68,7 +68,7 @@ class AutoSyncOptions:
     #: Frames are downscaled to this width before tracking; the rotation of the whole
     #: image is a large-scale signal, so detail is not needed.
     analysis_width: int = 480
-    #: Offsets searched, in seconds, relative to the log's own timeline.
+    #: Log delays searched, in seconds, relative to the log's own timeline.
     search_min: float | None = None
     search_max: float | None = None
     #: Tracked feature points per frame.
@@ -77,7 +77,7 @@ class AutoSyncOptions:
     collect_diagnostics: bool = False
 
 
-def estimate_offset(
+def estimate_log_delay(
     video: str | Path,
     telemetry: TelemetryLog,
     options: AutoSyncOptions | None = None,
@@ -124,7 +124,7 @@ def compute_manual_diagnostics(
 ) -> AutoSyncDiagnostics:
     """Roll and roll-rate signals for a manually chosen video slice, for plotting.
 
-    Unlike :func:`estimate_offset` this does not search for an offset -- the caller
+    Unlike :func:`estimate_log_delay` this does not search for a log delay -- the caller
     already has one (from ``manualsync``) and wants to see how well it lines up.
     """
     options = options or AutoSyncOptions()
@@ -267,7 +267,7 @@ def _correlate(
         )
 
     lags = log_times[: correlation.size]
-    # Default the search to offsets where the analysed window actually falls inside the
+    # Default the search to log delays where the analysed window actually falls inside the
     # log. Without this the peak can land somewhere that leaves the clip hanging off
     # the end of the flight -- an answer that is impossible rather than merely wrong.
     lo, hi = _default_search_range(roll, options)
@@ -293,12 +293,12 @@ def _correlate(
     runner_up = float(np.max(finite)) if finite.size else 0.0
     confidence = peak / runner_up if runner_up > 0 else (peak * 10 if peak > 0 else 0.0)
 
-    offset = float(lags[best] - options.start)
+    log_delay = float(lags[best] - options.start)
     warning = ""
     if peak < 0.35:
         warning = "weak correlation: the estimate is probably meaningless"
     elif confidence < 1.5:
-        warning = "several candidate offsets score alike: verify by eye"
+        warning = "several candidate log delays score alike: verify by eye"
 
     diagnostics = None
     if options.collect_diagnostics:
@@ -312,7 +312,7 @@ def _correlate(
         )
 
     return AutoSyncResult(
-        offset=offset,
+        log_delay=log_delay,
         confidence=float(confidence),
         correlation=peak,
         analysed=analysed,
@@ -336,7 +336,7 @@ def _autoscale_y(ax, series: list[tuple[np.ndarray, np.ndarray]], xlim: tuple[fl
     non_empty = [v for v in values if v.size]
     if not non_empty:
         raise ValueError(
-            f"no log data between {xlim[0]:.1f}s and {xlim[1]:.1f}s: check --offset, "
+            f"no log data between {xlim[0]:.1f}s and {xlim[1]:.1f}s: check --log-delay, "
             "the log covers a different time range"
         )
     values = np.concatenate(non_empty)
@@ -349,7 +349,7 @@ def _autoscale_y(ax, series: list[tuple[np.ndarray, np.ndarray]], xlim: tuple[fl
 
 def save_diagnostic_plots(
     diagnostics: AutoSyncDiagnostics,
-    offset: float,
+    log_delay: float,
     output_dir: Path,
     *,
     filename: str = "autosync_diagnostics.png",
@@ -357,10 +357,10 @@ def save_diagnostic_plots(
 ) -> Path:
     """Save the signals behind a sync estimate as one two-panel PNG.
 
-    ``offset`` shifts the video times onto the log's timebase (``log_time = offset +
-    video_time``), so the two roll-rate traces in the bottom panel line up the way the
-    estimate claims they do. ``xlim``, in log seconds, crops both panels to a range of
-    interest (e.g. the slice a manual sync was checked against).
+    ``log_delay`` shifts the video times onto the log's timebase (``log_time =
+    log_delay + video_time``), so the two roll-rate traces in the bottom panel line up
+    the way the estimate claims they do. ``xlim``, in log seconds, crops both panels to
+    a range of interest (e.g. the slice a manual sync was checked against).
     """
     import matplotlib
 
@@ -383,7 +383,7 @@ def save_diagnostic_plots(
         label="log roll rate",
     )
     ax_rate.plot(
-        diagnostics.video_times + offset,
+        diagnostics.video_times + log_delay,
         diagnostics.video_roll_rate,
         linewidth=0.8,
         color="tab:orange",
@@ -402,7 +402,7 @@ def save_diagnostic_plots(
             ax_rate,
             [
                 (diagnostics.log_times, diagnostics.log_roll_rate),
-                (diagnostics.video_times + offset, diagnostics.video_roll_rate),
+                (diagnostics.video_times + log_delay, diagnostics.video_roll_rate),
             ],
             xlim,
         )

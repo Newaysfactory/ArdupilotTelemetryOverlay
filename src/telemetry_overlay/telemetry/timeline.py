@@ -114,7 +114,7 @@ class FrameState:
 
 @dataclass
 class Timeline:
-    """Per-frame telemetry for one video/log pair at a given sync offset."""
+    """Per-frame telemetry for one video/log pair at a given log delay."""
 
     video_times: np.ndarray
     log_times: np.ndarray
