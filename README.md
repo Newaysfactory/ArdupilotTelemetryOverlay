@@ -419,8 +419,9 @@ telemetry-overlay autosync <video> <log> [-p PRESET]
   Without it, `autosync` only prints the suggestion; nothing is ever written automatically.
 - `--plot DIR` — with more than one window, save `autosync_fit.png` (each window's log
   delay against its position in the video, trustworthy vs. discarded, and the fitted
-  line — the drift shows up directly as its slope) plus `autosync_diagnostics.png` for
-  the single best-scoring window (roll and roll-rate overlay, as before). With
+  line — the drift shows up directly as its slope) plus `autosync_diagnostics.png`
+  (roll and roll-rate overlay for the *whole* analysed `--from`→`--to` span, from the
+  single continuous optical-flow pass — not just the best-scoring window). With
   `--windows 1`, only the latter is produced.
 
 Needs visible, textured ground and real manoeuvring. Footage of empty sky, straight and

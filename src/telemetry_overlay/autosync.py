@@ -174,6 +174,10 @@ class SyncFitResult:
     residual_std: float
     span_covered: float
     warning: str = ""
+    #: Video/log roll-rate over the *whole* analysed span (one continuous optical-flow
+    #: pass, see :func:`estimate_sync`), for plotting -- not just the best window's
+    #: slice. Present only when ``collect_diagnostics`` was requested.
+    diagnostics: AutoSyncDiagnostics | None = None
 
     @property
     def used(self) -> list[WindowFit]:
@@ -227,6 +231,19 @@ def estimate_sync(
     if gate is not None:
         return SyncFitResult(0.0, 1.0, [], 0.0, 0.0, gate.warning)
 
+    diagnostics = None
+    if options.collect_diagnostics:
+        dt_diag = info.frame_interval
+        log_times, log_roll, log_rate = _log_roll_signal(roll, dt_diag)
+        video_times = options.start + dt_diag * (1 + np.arange(len(video_rate)))
+        diagnostics = AutoSyncDiagnostics(
+            video_times=video_times,
+            video_roll_rate=video_rate,
+            log_times=log_times,
+            log_roll=log_roll,
+            log_roll_rate=log_rate,
+        )
+
     dt = info.frame_interval
     if n_windows == 1:
         result = _correlate(video_rate, info, roll, scan_options, analysed, frames)
@@ -238,6 +255,7 @@ def estimate_sync(
             residual_std=0.0,
             span_covered=0.0,
             warning=result.warning,
+            diagnostics=diagnostics,
         )
 
     length = max(1, int(round(options.window_length / dt)))
@@ -252,7 +270,9 @@ def estimate_sync(
             start=window_start,
             search_min=options.search_min,
             search_max=options.search_max,
-            collect_diagnostics=options.collect_diagnostics,
+            # The whole-span diagnostics above already covers this: no need to collect
+            # a redundant per-window slice.
+            collect_diagnostics=False,
         )
         window_analysed = len(slice_rate) * dt
         window_gate = _quality_gate(slice_rate, window_analysed, len(slice_rate))
@@ -261,7 +281,7 @@ def estimate_sync(
         )
         windows.append(WindowFit(start=window_start, result=result))
 
-    return _fit_sync(windows, options)
+    return _fit_sync(windows, options, diagnostics)
 
 
 def _select_active_windows(
@@ -290,7 +310,11 @@ def _select_active_windows(
     return sorted(chosen)
 
 
-def _fit_sync(windows: list[WindowFit], options: SyncFitOptions) -> SyncFitResult:
+def _fit_sync(
+    windows: list[WindowFit],
+    options: SyncFitOptions,
+    diagnostics: AutoSyncDiagnostics | None = None,
+) -> SyncFitResult:
     trustworthy = [w for w in windows if w.result.trustworthy]
     if len(trustworthy) < options.min_windows_for_scale:
         # Prefer an actually-trustworthy window over one with a merely higher raw
@@ -311,6 +335,7 @@ def _fit_sync(windows: list[WindowFit], options: SyncFitOptions) -> SyncFitResul
                 "the single best window -- try --windows more spread out, a longer "
                 "--window-length, or a span with more manoeuvres"
             ),
+            diagnostics=diagnostics,
         )
 
     starts = np.array([w.start for w in trustworthy])
@@ -334,6 +359,7 @@ def _fit_sync(windows: list[WindowFit], options: SyncFitOptions) -> SyncFitResul
                 "matched different manoeuvres, not the same one at different times -- "
                 "scale kept at 1.0, log delay from the single best window"
             ),
+            diagnostics=diagnostics,
         )
 
     for w, is_inlier in zip(trustworthy, inliers):
@@ -376,6 +402,7 @@ def _fit_sync(windows: list[WindowFit], options: SyncFitOptions) -> SyncFitResul
         residual_std=residual_std,
         span_covered=span_covered,
         warning=warning,
+        diagnostics=diagnostics,
     )
 
 

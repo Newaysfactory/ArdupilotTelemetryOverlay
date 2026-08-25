@@ -413,18 +413,13 @@ def cmd_autosync(args: argparse.Namespace) -> int:
         if len(result.windows) > 1:
             path = save_fit_plot(result, args.plot)
             print(f"  fit plot written to {path}")
-        if not result.windows:
-            print("  no per-window plot: the estimate failed before any window was analysed")
+        if result.diagnostics is None:
+            print("  no plot: the estimate failed before the signals were computed")
         else:
-            trustworthy = [w for w in result.windows if w.result.trustworthy]
-            best = max(trustworthy or result.windows, key=lambda w: w.result.correlation)
-            if best.result.diagnostics is None:
-                print("  no per-window plot: the estimate failed before the signals were computed")
-            else:
-                path = save_diagnostic_plots(
-                    best.result.diagnostics, best.result.log_delay, args.plot
-                )
-                print(f"  best-window plot written to {path}")
+            path = save_diagnostic_plots(
+                result.diagnostics, result.log_delay, args.plot, scale=result.scale
+            )
+            print(f"  diagnostics plot written to {path}")
     return 0
 
 
