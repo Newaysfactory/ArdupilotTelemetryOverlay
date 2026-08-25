@@ -1,0 +1,1 @@
+- Il roll rate calcolato con l'optical flow e quello letto dai log sono opposti. capire qual è il verso giusto e modificare autosync e manualsync di conseguenza. Questo è probabilmente il motivo per cui autosync trova correlazioni basse 
