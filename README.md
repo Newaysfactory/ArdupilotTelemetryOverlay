@@ -2,7 +2,8 @@
 
 Burns telemetry from an ArduPlane DataFlash log (`.bin`) onto flight video as an
 FPV-style HUD/OSD: airspeed, ground speed, altitude, height above ground, vertical
-speed, battery voltage, autopilot status messages and an artificial horizon.
+speed, battery voltage/current/consumption, throttle, autopilot status messages and an
+artificial horizon.
 
 Phase 1 (this version) is the command-line core. The interactive GUI for time
 synchronisation and drag-and-drop layout editing is phase 2; the rendering engine,
@@ -581,7 +582,8 @@ and a type-specific `options` block — see the docstrings in
 `src/telemetry_overlay/hud/elements/`.
 
 Units are per element: `km/h`, `kt`, `mph`, `m/s` for speeds, `m`/`ft` for heights,
-`m/s_v`/`ft/min` for vertical speed.
+`m/s_v`/`ft/min` for vertical speed, `A` for current, `mAh` for consumed charge, `%` for
+throttle.
 
 Two options worth knowing:
 
@@ -603,6 +605,9 @@ Verified against ArduPlane 4.7. `probe` shows which source each channel actually
 | AGL | `RFND.Dist`, only while the rangefinder reports Good | none, by design |
 | VS | `BARO.CRt` | `-XKF1.VD` |
 | Voltage | `BAT.Volt` | — |
+| Current | `BAT.Curr` | — |
+| Consumed | `BAT.CurrTot` (already mAh, cumulative) | — |
+| Throttle | `CTUN.ThO` (already 0..100 %) | — |
 | Attitude | `ATT.Roll/Pitch/Yaw` | `AHR2` |
 | Mode, messages | `MODE`, `MSG` | — |
 

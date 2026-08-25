@@ -25,6 +25,9 @@ _DEFAULT_DIGITS = {
     units_mod.LENGTH: 4,
     units_mod.VERTICAL_SPEED: 2,
     units_mod.VOLTAGE: 2,
+    units_mod.CURRENT: 2,
+    units_mod.CHARGE: 4,
+    units_mod.PERCENT: 3,
     units_mod.ANGLE: 3,
 }
 

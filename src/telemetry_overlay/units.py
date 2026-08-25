@@ -15,6 +15,9 @@ SPEED = "speed"
 LENGTH = "length"
 VERTICAL_SPEED = "vertical_speed"
 VOLTAGE = "voltage"
+CURRENT = "current"
+CHARGE = "charge"
+PERCENT = "percent"
 ANGLE = "angle"
 DURATION = "duration"
 DIMENSIONLESS = "dimensionless"
@@ -53,6 +56,12 @@ _UNITS: dict[str, Unit] = {
     "ft/min": Unit("ft/min", VERTICAL_SPEED, "ft/min", 196.85039370079, 0),
     # Voltage
     "V": Unit("V", VOLTAGE, "V", 1.0, 1),
+    # Current (SI: A)
+    "A": Unit("A", CURRENT, "A", 1.0, 1),
+    # Charge (SI: mAh -- BAT.CurrTot is already logged in mAh, not coulombs)
+    "mAh": Unit("mAh", CHARGE, "mAh", 1.0, 0),
+    # Percent
+    "%": Unit("%", PERCENT, "%", 1.0, 0),
     # Angle
     "deg": Unit("deg", ANGLE, "°", 1.0, 0),
     # Duration and plain numbers are formatted by their own elements.
@@ -66,6 +75,9 @@ DEFAULT_UNITS: dict[str, str] = {
     LENGTH: "m",
     VERTICAL_SPEED: "m/s_v",
     VOLTAGE: "V",
+    CURRENT: "A",
+    CHARGE: "mAh",
+    PERCENT: "%",
     ANGLE: "deg",
     DURATION: "s",
     DIMENSIONLESS: "",

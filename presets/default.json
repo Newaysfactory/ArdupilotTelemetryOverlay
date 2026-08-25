@@ -55,6 +55,45 @@
       }
     },
     {
+      "type": "readout",
+      "id": "current",
+      "x": 0.03,
+      "y": 0.10,
+      "anchor": "top-left",
+      "unit": "A",
+      "options": {
+        "channel": "current",
+        "label": "CUR",
+        "digits": 2
+      }
+    },
+    {
+      "type": "readout",
+      "id": "consumed",
+      "x": 0.03,
+      "y": 0.145,
+      "anchor": "top-left",
+      "unit": "mAh",
+      "options": {
+        "channel": "consumed",
+        "label": "MAH",
+        "digits": 4
+      }
+    },
+    {
+      "type": "readout",
+      "id": "throttle",
+      "x": 0.03,
+      "y": 0.19,
+      "anchor": "top-left",
+      "unit": "%",
+      "options": {
+        "channel": "throttle",
+        "label": "THR",
+        "digits": 3
+      }
+    },
+    {
       "type": "timer",
       "id": "timer",
       "x": 0.97,

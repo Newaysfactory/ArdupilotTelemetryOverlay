@@ -16,7 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from ..units import ANGLE, LENGTH, SPEED, VERTICAL_SPEED, VOLTAGE
+from ..units import ANGLE, CHARGE, CURRENT, LENGTH, PERCENT, SPEED, VERTICAL_SPEED, VOLTAGE
 
 #: Channel names used throughout the HUD.
 IAS = "ias"
@@ -25,6 +25,9 @@ ALT = "alt"
 AGL = "agl"
 VS = "vs"
 VOLTAGE_CH = "voltage"
+CURRENT_CH = "current"
+CONSUMED = "consumed"
+THROTTLE = "throttle"
 ROLL = "roll"
 PITCH = "pitch"
 YAW = "yaw"
@@ -136,6 +139,26 @@ CHANNELS: tuple[ChannelSpec, ...] = (
         VOLTAGE,
         "BAT",
         (Source("BAT.Volt", "BAT", lambda m: m.Volt, None, "Inst"),),
+    ),
+    ChannelSpec(
+        CURRENT_CH,
+        CURRENT,
+        "CUR",
+        (Source("BAT.Curr", "BAT", lambda m: m.Curr, None, "Inst"),),
+    ),
+    ChannelSpec(
+        CONSUMED,
+        CHARGE,
+        "MAH",
+        # BAT.CurrTot is already the cumulative consumption in mAh, not coulombs.
+        (Source("BAT.CurrTot", "BAT", lambda m: m.CurrTot, None, "Inst"),),
+    ),
+    ChannelSpec(
+        THROTTLE,
+        PERCENT,
+        "THR",
+        # CTUN.ThO is the throttle output already in 0..100 percent.
+        (Source("CTUN.ThO", "CTUN", lambda m: m.ThO),),
     ),
     ChannelSpec(
         ROLL,
