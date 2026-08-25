@@ -79,7 +79,35 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="write the estimate to the video's .sync.json (never automatic)",
     )
+    autosync.add_argument(
+        "--plot",
+        type=Path,
+        help="save diagnostic plots (video roll rate, log roll rate, log roll) "
+        "to this directory",
+    )
     autosync.set_defaults(func=cmd_autosync)
+
+    manualsync = subparsers.add_parser(
+        "manualsync",
+        help="plot a chosen offset against video/log roll, to check it by eye",
+    )
+    _add_common(manualsync, with_offset=False)
+    manualsync.add_argument(
+        "--from", dest="start", type=float, required=True, help="video start time, s"
+    )
+    manualsync.add_argument(
+        "--to", dest="end", type=float, required=True, help="video end time, s"
+    )
+    manualsync.add_argument(
+        "--offset", type=float, required=True, help="log_time = offset + video_time"
+    )
+    manualsync.add_argument(
+        "--plot",
+        type=Path,
+        default=Path("out"),
+        help="directory to save manualsync_diagnostics.png in (default: out)",
+    )
+    manualsync.set_defaults(func=cmd_manualsync)
 
     export = subparsers.add_parser("export", help="write the video with the overlay")
     _add_common(export)
@@ -265,6 +293,7 @@ def cmd_autosync(args: argparse.Namespace) -> int:
         start=args.start,
         search_min=args.search_min,
         search_max=args.search_max,
+        collect_diagnostics=bool(args.plot),
     )
     print(
         f"analysing {options.window:.0f}s of video from {options.start:.0f}s "
@@ -296,6 +325,42 @@ def cmd_autosync(args: argparse.Namespace) -> int:
         sync = SyncModel(offset=result.offset, note="autosync")
         path = sync.save(SyncModel.path_for(args.video))
         print(f"  written to {path}")
+    if args.plot:
+        from .autosync import save_diagnostic_plots
+
+        if result.diagnostics is None:
+            print("  no plot: the estimate failed before the signals were computed")
+        else:
+            path = save_diagnostic_plots(result.diagnostics, result.offset, args.plot)
+            print(f"  plot written to {path}")
+    return 0
+
+
+def cmd_manualsync(args: argparse.Namespace) -> int:
+    from .autosync import compute_manual_diagnostics, save_diagnostic_plots
+    from .video.probe import probe_video
+
+    info = probe_video(args.video)
+    log = read_log(args.log, progress=_note)
+    print(f"analysing video {args.start:.1f}s -> {args.end:.1f}s (optical flow)...")
+    diagnostics = compute_manual_diagnostics(
+        args.video,
+        log,
+        args.start,
+        args.end,
+        info=info,
+        progress=lambda f: _progress_bar("  tracking", f),
+    )
+    print()
+    xlim = (args.offset + args.start, args.offset + args.end)
+    path = save_diagnostic_plots(
+        diagnostics,
+        args.offset,
+        args.plot,
+        filename="manualsync_diagnostics.png",
+        xlim=xlim,
+    )
+    print(f"  plot written to {path}")
     return 0
 
 

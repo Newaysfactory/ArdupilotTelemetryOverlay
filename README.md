@@ -366,7 +366,7 @@ pass `--write`.
 ```
 telemetry-overlay autosync <video> <log> [-p PRESET]
     [--from SECONDS] [--window SECONDS] [--search-min SECONDS] [--search-max SECONDS]
-    [--write]
+    [--write] [--plot DIR]
 ```
 
 - `video`, `log` — required positionals.
@@ -378,6 +378,12 @@ telemetry-overlay autosync <video> <log> [-p PRESET]
   return, in **log** seconds.
 - `--write` — store the accepted estimate in `<video>.sync.json`. Without it, `autosync`
   only prints the suggestion; nothing is ever written automatically.
+- `--plot DIR` — save `autosync_diagnostics.png` to `DIR`: a top panel with the log's
+  roll, and a bottom panel overlaying the log's roll rate with the video's optical-flow
+  roll rate, the video trace shifted by the estimated offset so the two lines line up
+  the way the estimate claims. Use it to see by eye why a correlation is weak — e.g. no
+  rotation signal in the chosen video slice, a flat stretch of the log, or two shapes
+  that clearly do not match despite the shift.
 
 It does not analyse the whole video: it takes a single slice of it and slides that slice
 against the log. `--from`/`--window` choose the slice, both in **video** seconds counted
@@ -404,6 +410,29 @@ telemetry-overlay autosync "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin
 It needs visible, textured ground and real manoeuvring. Footage of empty sky, straight
 and level flight, or a gimballed camera will not correlate; that is what the confidence
 score is for. Always verify with `frame` before trusting it.
+
+### `manualsync` — check a chosen offset by eye
+
+Plots a specific video slice's optical-flow roll rate against the log's roll and roll
+rate, shifted by an offset you already picked (by hand, or from `autosync`). Unlike
+`autosync` it does not search for anything; it just draws the two panel diagnostic plot
+for that one slice so you can see whether the two traces actually line up.
+
+```
+telemetry-overlay manualsync <video> <log> [-p PRESET]
+    --from SECONDS --to SECONDS --offset SECONDS [--plot DIR]
+```
+
+- `video`, `log` — required positionals.
+- `-p`, `--preset PATH` — accepted for consistency with the other commands but unused.
+- `--from` / `--to SECONDS` — the video slice to analyse, in video seconds.
+- `--offset SECONDS` — the offset to check: `log_time = offset + video_time`.
+- `--plot DIR` — directory to save `manualsync_diagnostics.png` in (default: `out`).
+
+```powershell
+telemetry-overlay manualsync "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
+    --from 60 --to 90 --offset 206.1
+```
 
 ### `export` — write the final video
 

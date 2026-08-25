@@ -28,6 +28,17 @@ log = logging.getLogger(__name__)
 
 
 @dataclass
+class AutoSyncDiagnostics:
+    """Raw signals behind an :class:`AutoSyncResult`, for plotting."""
+
+    video_times: np.ndarray
+    video_roll_rate: np.ndarray
+    log_times: np.ndarray
+    log_roll: np.ndarray
+    log_roll_rate: np.ndarray
+
+
+@dataclass
 class AutoSyncResult:
     offset: float
     #: Peak-to-runner-up ratio of the correlation. Above ~1.5 the peak is distinct;
@@ -40,6 +51,8 @@ class AutoSyncResult:
     samples: int
     #: Set when the result should not be trusted, with the reason.
     warning: str = ""
+    #: Present when the caller asked for the raw signals (see ``AutoSyncOptions.collect_diagnostics``).
+    diagnostics: AutoSyncDiagnostics | None = None
 
     @property
     def trustworthy(self) -> bool:
@@ -60,6 +73,8 @@ class AutoSyncOptions:
     search_max: float | None = None
     #: Tracked feature points per frame.
     max_features: int = 250
+    #: Keep the raw video/log roll-rate signals on the result, for plotting.
+    collect_diagnostics: bool = False
 
 
 def estimate_offset(
@@ -95,6 +110,46 @@ def estimate_offset(
         )
 
     return _correlate(video_rate, info, roll, options, analysed, frames)
+
+
+def compute_manual_diagnostics(
+    video: str | Path,
+    telemetry: TelemetryLog,
+    start: float,
+    end: float,
+    options: AutoSyncOptions | None = None,
+    *,
+    info: VideoInfo | None = None,
+    progress: Callable[[float], None] | None = None,
+) -> AutoSyncDiagnostics:
+    """Roll and roll-rate signals for a manually chosen video slice, for plotting.
+
+    Unlike :func:`estimate_offset` this does not search for an offset -- the caller
+    already has one (from ``manualsync``) and wants to see how well it lines up.
+    """
+    options = options or AutoSyncOptions()
+    options = AutoSyncOptions(
+        window=end - start,
+        start=start,
+        analysis_width=options.analysis_width,
+        max_features=options.max_features,
+    )
+    info = info or probe_video(video)
+    roll = telemetry.channel(fields.ROLL)
+    if roll is None or len(roll) < 10:
+        raise ValueError("the log has no attitude data")
+
+    video_rate, _, _ = _video_roll_rate(Path(video), info, options, progress)
+    dt = info.frame_interval
+    log_times, log_roll, log_rate = _log_roll_signal(roll, dt)
+    video_times = start + dt * (1 + np.arange(len(video_rate)))
+    return AutoSyncDiagnostics(
+        video_times=video_times,
+        video_roll_rate=video_rate,
+        log_times=log_times,
+        log_roll=log_roll,
+        log_roll_rate=log_rate,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +227,14 @@ def _rotation_between(cv2, previous, current, feature_args) -> float:
     return float(np.degrees(np.arctan2(matrix[1, 0], matrix[0, 0])))
 
 
+def _log_roll_signal(roll, dt: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Roll and roll rate resampled onto a fixed-``dt`` grid spanning the whole log."""
+    log_times = np.arange(roll.t[0], roll.t[-1], dt)
+    log_roll = np.interp(log_times, roll.t, np.unwrap(roll.v, period=360.0))
+    log_rate = np.gradient(log_roll, dt)
+    return log_times, log_roll, log_rate
+
+
 def _correlate(
     video_rate: np.ndarray,
     info: VideoInfo,
@@ -182,10 +245,7 @@ def _correlate(
 ) -> AutoSyncResult:
     """Slide the log's roll rate against the video's and take the best lag."""
     dt = info.frame_interval
-    # Resample the log's roll rate onto the video's frame grid.
-    log_times = np.arange(roll.t[0], roll.t[-1], dt)
-    log_roll = np.interp(log_times, roll.t, np.unwrap(roll.v, period=360.0))
-    log_rate = np.gradient(log_roll, dt)
+    log_times, log_roll, log_rate = _log_roll_signal(roll, dt)
 
     a = _normalise(video_rate)
     b = _normalise(log_rate)
@@ -234,6 +294,18 @@ def _correlate(
         warning = "weak correlation: the estimate is probably meaningless"
     elif confidence < 1.5:
         warning = "several candidate offsets score alike: verify by eye"
+
+    diagnostics = None
+    if options.collect_diagnostics:
+        video_times = options.start + dt * (1 + np.arange(len(video_rate)))
+        diagnostics = AutoSyncDiagnostics(
+            video_times=video_times,
+            video_roll_rate=video_rate,
+            log_times=log_times,
+            log_roll=log_roll,
+            log_roll_rate=log_rate,
+        )
+
     return AutoSyncResult(
         offset=offset,
         confidence=float(confidence),
@@ -241,12 +313,94 @@ def _correlate(
         analysed=analysed,
         samples=frames,
         warning=warning,
+        diagnostics=diagnostics,
     )
 
 
 def _default_search_range(roll, options: AutoSyncOptions) -> tuple[float, float]:
     """Log times at which the analysed video window can begin and still be covered."""
     return float(roll.t[0]), float(roll.t[-1] - options.window)
+
+
+def _autoscale_y(ax, series: list[tuple[np.ndarray, np.ndarray]], xlim: tuple[float, float]) -> None:
+    """Set y-limits from the data actually inside ``xlim``, with a small margin."""
+    values = [
+        y[(x >= xlim[0]) & (x <= xlim[1])]
+        for x, y in series
+    ]
+    values = np.concatenate([v for v in values if v.size])
+    if values.size == 0:
+        return
+    lo, hi = float(values.min()), float(values.max())
+    margin = (hi - lo) * 0.1 or 1.0
+    ax.set_ylim(lo - margin, hi + margin)
+
+
+def save_diagnostic_plots(
+    diagnostics: AutoSyncDiagnostics,
+    offset: float,
+    output_dir: Path,
+    *,
+    filename: str = "autosync_diagnostics.png",
+    xlim: tuple[float, float] | None = None,
+) -> Path:
+    """Save the signals behind a sync estimate as one two-panel PNG.
+
+    ``offset`` shifts the video times onto the log's timebase (``log_time = offset +
+    video_time``), so the two roll-rate traces in the bottom panel line up the way the
+    estimate claims they do. ``xlim``, in log seconds, crops both panels to a range of
+    interest (e.g. the slice a manual sync was checked against).
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    fig, (ax_roll, ax_rate) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+
+    ax_roll.plot(diagnostics.log_times, diagnostics.log_roll, linewidth=0.8)
+    ax_roll.set_title("Log roll")
+    ax_roll.set_ylabel("roll [deg]")
+    ax_roll.grid(True, alpha=0.3)
+
+    ax_rate.plot(
+        diagnostics.log_times,
+        diagnostics.log_roll_rate,
+        linewidth=0.8,
+        color="tab:blue",
+        label="log roll rate",
+    )
+    ax_rate.plot(
+        diagnostics.video_times + offset,
+        diagnostics.video_roll_rate,
+        linewidth=0.8,
+        color="tab:orange",
+        label="video roll rate",
+    )
+    ax_rate.set_title("Log vs. video roll rate")
+    ax_rate.set_xlabel("log time [s]")
+    ax_rate.set_ylabel("roll rate [deg/s]")
+    ax_rate.grid(True, alpha=0.3)
+    ax_rate.legend()
+
+    if xlim is not None:
+        ax_rate.set_xlim(xlim)
+        _autoscale_y(ax_roll, [(diagnostics.log_times, diagnostics.log_roll)], xlim)
+        _autoscale_y(
+            ax_rate,
+            [
+                (diagnostics.log_times, diagnostics.log_roll_rate),
+                (diagnostics.video_times + offset, diagnostics.video_roll_rate),
+            ],
+            xlim,
+        )
+
+    fig.tight_layout()
+    path = output_dir / filename
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    return path
 
 
 def _normalise(signal: np.ndarray) -> np.ndarray | None:
