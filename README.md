@@ -460,13 +460,14 @@ for that one slice so you can see whether the two traces actually line up.
 
 ```
 telemetry-overlay manualsync <video> <log> [-p PRESET]
-    --from SECONDS --to SECONDS (--log-delay SECONDS | --anchor-video-time SECONDS --anchor-log-time SECONDS)
+    [--from SECONDS] [--to SECONDS] (--log-delay SECONDS | --anchor-video-time SECONDS --anchor-log-time SECONDS)
     [--time-scale FACTOR] [--plot DIR]
 ```
 
 - `video`, `log` — required positionals.
 - `-p`, `--preset PATH` — accepted for consistency with the other commands but unused.
-- `--from` / `--to SECONDS` — the video slice to analyse, in video seconds.
+- `--from` / `--to SECONDS` — the video slice to analyse, in video seconds (default: the
+  whole video, `0` to its end).
 - `--log-delay SECONDS` — the log delay to check: `log_time = log_delay + video_time * scale`.
 - `--anchor-video-time SECONDS` / `--anchor-log-time SECONDS` — an alternative to
   `--log-delay`: the two timestamps of one moment recognisable in both video and log.

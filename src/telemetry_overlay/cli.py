@@ -116,10 +116,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_common(manualsync, with_log_delay=False)
     manualsync.add_argument(
-        "--from", dest="start", type=float, required=True, help="video start time, s"
+        "--from",
+        dest="start",
+        type=float,
+        default=0.0,
+        help="video start time, s (default: 0)",
     )
     manualsync.add_argument(
-        "--to", dest="end", type=float, required=True, help="video end time, s"
+        "--to",
+        dest="end",
+        type=float,
+        default=None,
+        help="video end time, s (default: end of video)",
     )
     _add_sync_args(manualsync)
     manualsync.add_argument(
@@ -434,17 +442,18 @@ def cmd_manualsync(args: argparse.Namespace) -> int:
         raise ValueError(
             "give either --log-delay or both --anchor-video-time and --anchor-log-time"
         )
-    print(f"analysing video {args.start:.1f}s -> {args.end:.1f}s (optical flow)...")
+    end = args.end if args.end is not None else info.duration
+    print(f"analysing video {args.start:.1f}s -> {end:.1f}s (optical flow)...")
     diagnostics = compute_manual_diagnostics(
         args.video,
         log,
         args.start,
-        args.end,
+        end,
         info=info,
         progress=lambda f: _progress_bar("  tracking", f),
     )
     print()
-    xlim = (sync.log_time(args.start), sync.log_time(args.end))
+    xlim = (sync.log_time(args.start), sync.log_time(end))
     path = save_diagnostic_plots(
         diagnostics,
         sync.log_delay,
