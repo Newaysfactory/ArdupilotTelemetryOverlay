@@ -223,8 +223,13 @@ def _rotation_between(cv2, previous, current, feature_args) -> float:
     )
     if matrix is None:
         return float("nan")
-    # A partial affine is scale*rotation plus translation; recover the angle.
-    return float(np.degrees(np.arctan2(matrix[1, 0], matrix[0, 0])))
+    # A partial affine is scale*rotation plus translation; recover the angle. This is
+    # the rotation of the *scene* between the two frames, which is the airframe's
+    # rotation with the sign flipped: when the aircraft rolls right, the camera rolls
+    # with it, and stationary ground features appear to rotate the opposite way in the
+    # image. Negate so the sign matches ArduPilot's ROLL convention (positive = right
+    # wing down) before this gets cross-correlated against the log.
+    return -float(np.degrees(np.arctan2(matrix[1, 0], matrix[0, 0])))
 
 
 def _log_roll_signal(roll, dt: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -328,7 +333,13 @@ def _autoscale_y(ax, series: list[tuple[np.ndarray, np.ndarray]], xlim: tuple[fl
         y[(x >= xlim[0]) & (x <= xlim[1])]
         for x, y in series
     ]
-    values = np.concatenate([v for v in values if v.size])
+    non_empty = [v for v in values if v.size]
+    if not non_empty:
+        raise ValueError(
+            f"no log data between {xlim[0]:.1f}s and {xlim[1]:.1f}s: check --offset, "
+            "the log covers a different time range"
+        )
+    values = np.concatenate(non_empty)
     if values.size == 0:
         return
     lo, hi = float(values.min()), float(values.max())
