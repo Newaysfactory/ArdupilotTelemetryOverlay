@@ -65,10 +65,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_common(autosync, with_offset=False)
     autosync.add_argument(
-        "--window", type=float, default=60.0, help="video seconds to analyse"
+        "--from", dest="start", type=float, default=0.0, help="video time to start at"
     )
     autosync.add_argument(
-        "--from", dest="start", type=float, default=0.0, help="video time to start at"
+        "--to",
+        dest="end",
+        type=float,
+        help="video time to stop at (default: 60s after --from)",
     )
     autosync.add_argument(
         "--search-min", type=float, help="earliest log time to consider"
@@ -112,8 +115,12 @@ def build_parser() -> argparse.ArgumentParser:
     export = subparsers.add_parser("export", help="write the video with the overlay")
     _add_common(export)
     export.add_argument("-o", "--output", type=Path, help="default: <video>.overlay.mp4")
-    export.add_argument("--start", type=float, help="trim start, in video seconds")
-    export.add_argument("--duration", type=float, help="trim duration, in seconds")
+    export.add_argument(
+        "--from", dest="start", type=float, help="trim start, in video seconds"
+    )
+    export.add_argument(
+        "--to", dest="end", type=float, help="trim end, in video seconds"
+    )
     export.add_argument(
         "--encoder", help="encoder key; see 'probe' for what this machine supports"
     )
@@ -293,8 +300,9 @@ def cmd_autosync(args: argparse.Namespace) -> int:
 
     info = probe_video(args.video)
     log = read_log(args.log, progress=_note)
+    window = (args.end - args.start) if args.end is not None else 60.0
     options = AutoSyncOptions(
-        window=args.window,
+        window=window,
         start=args.start,
         search_min=args.search_min,
         search_max=args.search_max,
@@ -384,7 +392,7 @@ def cmd_export(args: argparse.Namespace) -> int:
         quality=args.quality,
         scale=args.scale,
         start=args.start,
-        duration=args.duration,
+        end=args.end,
         copy_audio=not args.no_audio,
         overwrite=args.overwrite,
     )

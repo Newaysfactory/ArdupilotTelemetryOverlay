@@ -114,16 +114,16 @@ there is no "with/without saving" distinction here — a plain run and a `--writ
 shown in [its reference entry](#autosync--suggest-a-time-offset):
 
 ```bash
-telemetry-overlay autosync flight.MP4 flight.bin --from 60 --window 60 \
+telemetry-overlay autosync flight.MP4 flight.bin --from 60 --to 120 \
     --search-min 171.7 --search-max 415.9
 ```
 
 ```powershell
 telemetry-overlay autosync "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
-    --from 60 --window 60 --search-min 171.7 --search-max 415.9
+    --from 60 --to 120 --search-min 171.7 --search-max 415.9
 ```
 
-Pass `--from`/`--window` a stretch of video with real turns in it, and bound the search
+Pass `--from`/`--to` a stretch of video with real turns in it, and bound the search
 with the offset range `probe` printed. Read the confidence score: a low one means the
 footage did not correlate, not that the number is nearly right.
 
@@ -232,27 +232,27 @@ Without a saved offset:
 
 ```bash
 telemetry-overlay export flight.MP4 flight.bin --offset 171.8 -p presets/mine.json \
-    --start 210 --duration 10 -o out/test.mp4
+    --from 210 --to 220 -o out/test.mp4
 ```
 
 ```powershell
 telemetry-overlay export "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
-    --offset 171.8 -p presets\mine.json --start 210 --duration 10 -o out\test.mp4
+    --offset 171.8 -p presets\mine.json --from 210 --to 220 -o out\test.mp4
 ```
 
 With the offset saved in step 4:
 
 ```bash
 telemetry-overlay export flight.MP4 flight.bin -p presets/mine.json \
-    --start 210 --duration 10 -o out/test.mp4
+    --from 210 --to 220 -o out/test.mp4
 ```
 
 ```powershell
 telemetry-overlay export "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
-    -p presets\mine.json --start 210 --duration 10 -o out\test.mp4
+    -p presets\mine.json --from 210 --to 220 -o out\test.mp4
 ```
 
-`--start` and `--duration` are in video seconds. Watch it: check the sync at speed, that
+`--from` and `--to` are in video seconds. Watch it: check the sync at speed, that
 the audio is in place, and that nothing is clipped at the frame edges.
 
 ### Step 7 — export the whole flight
@@ -365,7 +365,7 @@ pass `--write`.
 
 ```
 telemetry-overlay autosync <video> <log> [-p PRESET]
-    [--from SECONDS] [--window SECONDS] [--search-min SECONDS] [--search-max SECONDS]
+    [--from SECONDS] [--to SECONDS] [--search-min SECONDS] [--search-max SECONDS]
     [--write] [--plot DIR]
 ```
 
@@ -373,7 +373,7 @@ telemetry-overlay autosync <video> <log> [-p PRESET]
 - `-p`, `--preset PATH` — accepted for consistency with the other commands but unused by
   the estimate itself.
 - `--from SECONDS` — video time the analysed slice starts at (default `0`).
-- `--window SECONDS` — how long the slice lasts (default `60`).
+- `--to SECONDS` — video time the analysed slice ends at (default: 60 s after `--from`).
 - `--search-min` / `--search-max SECONDS` — bound the offset the estimate is allowed to
   return, in **log** seconds.
 - `--write` — store the accepted estimate in `<video>.sync.json`. Without it, `autosync`
@@ -386,25 +386,25 @@ telemetry-overlay autosync <video> <log> [-p PRESET]
   that clearly do not match despite the shift.
 
 It does not analyse the whole video: it takes a single slice of it and slides that slice
-against the log. `--from`/`--window` choose the slice, both in **video** seconds counted
-from the start of the file, e.g. `--from 30 --window 60` analyses video time 30 s → 90 s.
+against the log. `--from`/`--to` choose the slice, both in **video** seconds counted
+from the start of the file, e.g. `--from 30 --to 90` analyses video time 30 s → 90 s.
 Pick a stretch with actual turns in it: skip the taxi and the climb-out, and keep the
-window long enough to contain several manoeuvres.
+slice long enough to contain several manoeuvres.
 
 `--search-min`/`--search-max` restrict the answer instead of the input — useful when
 `probe` already told you the log window, since an offset outside it cannot be right:
 
 ```bash
-telemetry-overlay autosync flight.MP4 flight.bin --from 30 --window 60 \
+telemetry-overlay autosync flight.MP4 flight.bin --from 30 --to 90 \
     --search-min 170 --search-max 420
-telemetry-overlay autosync flight.MP4 flight.bin --from 30 --window 60 --write
+telemetry-overlay autosync flight.MP4 flight.bin --from 30 --to 90 --write
 ```
 
 Against the sample data, using the log window `probe` reported (`171.7` → `415.9`):
 
 ```powershell
 telemetry-overlay autosync "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
-    --from 60 --window 60 --search-min 171.7 --search-max 415.9
+    --from 60 --to 120 --search-min 171.7 --search-max 415.9
 ```
 
 It needs visible, textured ground and real manoeuvring. Footage of empty sky, straight
@@ -438,14 +438,14 @@ telemetry-overlay manualsync "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.b
 
 ```
 telemetry-overlay export <video> <log> [-p PRESET] [--offset SECONDS] [--save-sync]
-    [-o PATH] [--start SECONDS] [--duration SECONDS]
+    [-o PATH] [--from SECONDS] [--to SECONDS]
     [--encoder KEY] [--quality N] [--scale FACTOR] [--no-audio] [-y]
 ```
 
 - `video`, `log` — required positionals.
 - `-o`, `--output PATH` — where to write the file (default: `<video>.overlay.mp4`).
-- `--start SECONDS` — trim start, in video seconds (default: from the beginning).
-- `--duration SECONDS` — trim duration, in seconds (default: to the end of the video).
+- `--from SECONDS` — trim start, in video seconds (default: from the beginning).
+- `--to SECONDS` — trim end, in video seconds (default: to the end of the video).
 - `--encoder KEY` — one of `nvenc_h264`, `nvenc_hevc`, `x264`, `x265`; see `probe` for
   which of these this machine actually supports. Default: the best available, NVENC
   first, falling back to x264.
@@ -461,7 +461,7 @@ telemetry-overlay export <video> <log> [-p PRESET] [--offset SECONDS] [--save-sy
 
 ```bash
 # 10-second test segment first: seconds instead of minutes, and half resolution for speed
-telemetry-overlay export flight.MP4 flight.bin --offset 250 --start 100 --duration 10 \
+telemetry-overlay export flight.MP4 flight.bin --offset 250 --from 100 --to 110 \
     --scale 0.5
 
 # then the whole clip at full resolution, with an explicit encoder and quality
@@ -473,7 +473,7 @@ Against the sample data, a 10-second test segment starting at the AUTO takeoff:
 
 ```powershell
 telemetry-overlay export "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
-    --offset 171.8 --start 40 --duration 10 -o out\test.mp4
+    --offset 171.8 --from 40 --to 50 -o out\test.mp4
 ```
 
 ## Synchronising video and telemetry
