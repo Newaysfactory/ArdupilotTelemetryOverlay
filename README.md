@@ -108,21 +108,23 @@ printed back so you can check it).
 If you cannot spot such an event, let `autosync` propose a starting point — it is a
 suggestion, never the answer. It never writes anything unless you pass `--write`, so
 there is no "with/without saving" distinction here — a plain run and a `--write` run are
-shown in [its reference entry](#autosync--suggest-a-log-delay):
+shown in [its reference entry](#autosync--suggest-a-log-delay-and-clock-drift-scale):
 
 ```bash
-telemetry-overlay autosync flight.MP4 flight.bin --from 60 --to 120 \
-    --search-min 171.7 --search-max 415.9
+telemetry-overlay autosync flight.MP4 flight.bin --search-min 171.7 --search-max 415.9
 ```
 
 ```powershell
 telemetry-overlay autosync "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
-    --from 60 --to 120 --search-min 171.7 --search-max 415.9
+    --search-min 171.7 --search-max 415.9
 ```
 
-Pass `--from`/`--to` a stretch of video with real turns in it, and bound the search
-with the log delay range `probe` printed. Read the confidence score: a low one means the
-footage did not correlate, not that the number is nearly right.
+It spreads several windows across the whole video by default, bound the search with the
+log delay range `probe` printed, and fits both a log delay and a drift scale through the
+windows it trusts — printing a table so you can see which ones. Read the confidence
+verdict: a low one means the footage did not correlate, not that the number is nearly
+right; if a window with real manoeuvres in it is still discarded, `--window-length` (more
+seconds per window) usually fixes it.
 
 ### Step 3 — refine the log delay frame by frame
 
@@ -168,12 +170,15 @@ telemetry-overlay frame "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
 
 Then verify at a *second*, distant moment — the landing, for instance. If the first point
 matches and a point four minutes later does not, the two clocks are drifting, which is
-what the `scale` field in the sync file is for.
+what `scale` is for: re-run `autosync` across a span covering both points, or refine
+`--time-scale` by hand at the second point the same way you refined `--log-delay` at the
+first.
 
 ### Step 4 — save the log delay
 
 Once you are happy, store it beside the video by adding `--save-sync` to the last `frame`
-call — no need to run it again separately:
+call — no need to run it again separately. Include `--time-scale` too if Step 3 found
+drift:
 
 ```bash
 telemetry-overlay frame flight.MP4 flight.bin --at 40 --log-delay 171.8 --save-sync
@@ -306,9 +311,15 @@ sit before the subcommand name: `--version` prints the package version, and
   `--log-delay`, given as a pair: the video and log timestamps of one moment you
   recognise in both (e.g. takeoff). The log delay is computed from the two instead of
   you subtracting them by hand. Give either `--log-delay` or this pair, not both.
-- `--save-sync` — write the log delay in effect (whether given on the command line or read
-  from an existing `.sync.json`) to `<video>.sync.json` (`frame` and `export` only). If
-  it came from `--anchor-video-time`/`--anchor-log-time`, both timestamps are saved too.
+- `--time-scale FACTOR` — clock-drift scale: `log_time = log_delay + video_time *
+  scale`. Advanced, like `--log-delay`; combines with either `--log-delay` or the
+  `--anchor-*` pair. Defaults to `1.0`, or to the value stored in `.sync.json` (e.g. from
+  `autosync --write`). Not to be confused with `export`'s `--scale`, which downscales the
+  output frame.
+- `--save-sync` — write the log delay and scale in effect (whether given on the command
+  line or read from an existing `.sync.json`) to `<video>.sync.json` (`frame` and
+  `export` only). If it came from `--anchor-video-time`/`--anchor-log-time`, both
+  timestamps are saved too.
 
 ### `probe` — see what you have
 
@@ -341,7 +352,7 @@ Renders one composited frame to a PNG in about a second. This is the fast loop f
 adjusting a preset, with no GUI and no waiting for an export.
 
 ```
-telemetry-overlay frame <video> <log> [-p PRESET] [--log-delay SECONDS] [--save-sync]
+telemetry-overlay frame <video> <log> [-p PRESET] [--log-delay SECONDS] [--time-scale FACTOR] [--save-sync]
     [--at SECONDS] [-o PATH] [--width PIXELS] [--overlay-only]
 ```
 
@@ -367,59 +378,76 @@ telemetry-overlay frame "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
     --at 40 --log-delay 171.8 -o out\f.png
 ```
 
-### `autosync` — suggest a log delay
+### `autosync` — suggest a log delay and clock-drift scale
 
 Measures how fast the image rotates (optical flow) and correlates it with the roll rate
-in the log. It prints an estimate and a confidence score and changes nothing unless you
-pass `--write`.
+in the log. It runs the optical flow once across the whole span, picks the windows where
+the image actually rotates the most (calm cruise or straight legs cannot correlate
+against anything, so there is no point spending a window on them), correlates each
+against the log, and fits a log delay *and* a scale through the windows that agree with
+each other (clocks drift, so a single offset that matches at one point in the video can
+be seconds off at another). Prints the result with a confidence verdict and changes
+nothing unless you pass `--write`.
 
 ```
 telemetry-overlay autosync <video> <log> [-p PRESET]
-    [--from SECONDS] [--to SECONDS] [--search-min SECONDS] [--search-max SECONDS]
-    [--write] [--plot DIR]
+    [--from SECONDS] [--to SECONDS] [--windows N] [--window-length SECONDS]
+    [--search-min SECONDS] [--search-max SECONDS] [--write] [--plot DIR]
 ```
 
 - `video`, `log` — required positionals.
 - `-p`, `--preset PATH` — accepted for consistency with the other commands but unused by
   the estimate itself.
-- `--from SECONDS` — video time the analysed slice starts at (default `0`).
-- `--to SECONDS` — video time the analysed slice ends at (default: 60 s after `--from`).
+- `--from SECONDS` — video time to start spreading windows from (default `0`).
+- `--to SECONDS` — video time to stop spreading windows at (default: end of video).
+- `--windows N` — number of analysis windows, picked from wherever the image rotates the
+  most within `--from`/`--to`, spaced at least one window apart (default `6`). Each
+  window is scored independently and only the ones that agree with each other (a
+  distinct correlation peak, and a consistent log-delay-vs-time line — see
+  [Synchronising video and telemetry](#synchronising-video-and-telemetry)) feed the fit;
+  a window that is active but matched the wrong manoeuvre is excluded, not averaged in.
+  `--windows 1` disables the scale fit, analyses exactly `--from`→`--to` as one slice,
+  and keeps `scale` at `1.0` — the old single-slice behaviour.
+- `--window-length SECONDS` — duration of each window (default `20`). Longer windows
+  correlate more reliably but cost more decode time; the sample video needed `40` to get
+  a confident peak per window (see below).
 - `--search-min` / `--search-max SECONDS` — bound the log delay the estimate is allowed to
-  return, in **log** seconds.
-- `--write` — store the accepted estimate in `<video>.sync.json`. Without it, `autosync`
-  only prints the suggestion; nothing is ever written automatically.
-- `--plot DIR` — save `autosync_diagnostics.png` to `DIR`: a top panel with the log's
-  roll, and a bottom panel overlaying the log's roll rate with the video's optical-flow
-  roll rate, the video trace shifted by the estimated log delay so the two lines line up
-  the way the estimate claims. Use it to see by eye why a correlation is weak — e.g. no
-  rotation signal in the chosen video slice, a flat stretch of the log, or two shapes
-  that clearly do not match despite the shift.
+  return, in **log** seconds (the same quantity `probe` reports as "valid log delays"),
+  applied to every window.
+- `--write` — store the accepted estimate (log delay **and** scale) in `<video>.sync.json`.
+  Without it, `autosync` only prints the suggestion; nothing is ever written automatically.
+- `--plot DIR` — with more than one window, save `autosync_fit.png` (each window's log
+  delay against its position in the video, trustworthy vs. discarded, and the fitted
+  line — the drift shows up directly as its slope) plus `autosync_diagnostics.png` for
+  the single best-scoring window (roll and roll-rate overlay, as before). With
+  `--windows 1`, only the latter is produced.
 
-It does not analyse the whole video: it takes a single slice of it and slides that slice
-against the log. `--from`/`--to` choose the slice, both in **video** seconds counted
-from the start of the file, e.g. `--from 30 --to 90` analyses video time 30 s → 90 s.
-Pick a stretch with actual turns in it: skip the taxi and the climb-out, and keep the
-slice long enough to contain several manoeuvres.
-
-`--search-min`/`--search-max` restrict the answer instead of the input — useful when
-`probe` already told you the log window, since a log delay outside it cannot be right:
+Needs visible, textured ground and real manoeuvring. Footage of empty sky, straight and
+level flight, or a gimballed camera will not correlate in any window; that is what the
+per-window and overall confidence verdicts are for. Always verify with `frame` at more
+than one point in the video before trusting the result.
 
 ```bash
-telemetry-overlay autosync flight.MP4 flight.bin --from 30 --to 90 \
-    --search-min 170 --search-max 420
-telemetry-overlay autosync flight.MP4 flight.bin --from 30 --to 90 --write
+telemetry-overlay autosync flight.MP4 flight.bin --search-min 170 --search-max 420
+telemetry-overlay autosync flight.MP4 flight.bin --search-min 170 --search-max 420 --write
 ```
 
-Against the sample data, using the log window `probe` reported (`171.7` → `415.9`):
-
+Against the sample data, using the log window `probe` reported (`171.7` → `415.9`): the
+default 20 s windows were too short for a confident peak on this footage, `40` s worked —
 ```powershell
 telemetry-overlay autosync "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
-    --from 60 --to 120 --search-min 171.7 --search-max 415.9
+    --window-length 40 --search-min 171.7 --search-max 415.9 --plot out
 ```
+found `log_delay 414.057s`, `scale 1.00137` from 3 windows (correlation up to `0.98`)
+spanning 168 s — consistent with the manually-found `414.130` around video time 100 s,
+and with the drift that made a fixed offset lose sync by video time 200 s.
 
-It needs visible, textured ground and real manoeuvring. Footage of empty sky, straight
-and level flight, or a gimballed camera will not correlate; that is what the confidence
-score is for. Always verify with `frame` before trusting it.
+Not every clip correlates this cleanly. On footage with a less distinctive roll signal
+(similar turns repeated throughout, or long calm stretches), the windows may not agree
+closely enough to pass the fit's checks even after several tries with different
+`--window-length`/`--windows` values — `autosync` will say so (`check it by eye`) rather
+than guess. That is expected, not a bug: fall back to
+[anchoring by eye](#step-2--get-a-rough-log-delay) at more than one point in the video.
 
 ### `manualsync` — check a chosen log delay by eye
 
@@ -431,17 +459,19 @@ for that one slice so you can see whether the two traces actually line up.
 ```
 telemetry-overlay manualsync <video> <log> [-p PRESET]
     --from SECONDS --to SECONDS (--log-delay SECONDS | --anchor-video-time SECONDS --anchor-log-time SECONDS)
-    [--plot DIR]
+    [--time-scale FACTOR] [--plot DIR]
 ```
 
 - `video`, `log` — required positionals.
 - `-p`, `--preset PATH` — accepted for consistency with the other commands but unused.
 - `--from` / `--to SECONDS` — the video slice to analyse, in video seconds.
-- `--log-delay SECONDS` — the log delay to check: `log_time = log_delay + video_time`.
+- `--log-delay SECONDS` — the log delay to check: `log_time = log_delay + video_time * scale`.
 - `--anchor-video-time SECONDS` / `--anchor-log-time SECONDS` — an alternative to
   `--log-delay`: the two timestamps of one moment recognisable in both video and log.
   Give one form or the other; there is no `.sync.json` fallback here, unlike `frame` and
   `export`.
+- `--time-scale FACTOR` — the clock-drift scale to check alongside either form above
+  (default `1.0`).
 - `--plot DIR` — directory to save `manualsync_diagnostics.png` in (default: `out`).
 
 ```powershell
@@ -453,7 +483,7 @@ telemetry-overlay manualsync "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.b
 
 ```
 telemetry-overlay export <video> <log> [-p PRESET]
-    [--log-delay SECONDS | --anchor-video-time SECONDS --anchor-log-time SECONDS] [--save-sync]
+    [--log-delay SECONDS | --anchor-video-time SECONDS --anchor-log-time SECONDS] [--time-scale FACTOR] [--save-sync]
     [-o PATH] [--from SECONDS] [--to SECONDS]
     [--encoder KEY] [--quality N] [--scale FACTOR] [--no-audio] [-y]
 ```
@@ -496,11 +526,15 @@ telemetry-overlay export "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" 
 
 The camera clock cannot be trusted — on real footage the MP4 creation time can be off by
 more than a year — so the alignment is an explicit **log delay**: the log time, in seconds,
-that corresponds to video time zero.
+that corresponds to video time zero. A **scale** factor corrects for clock drift between
+the camera and the flight controller, which on a clip of a few minutes can add up to a
+noticeable desync by the end even when the start lines up perfectly:
 
 ```
-log_time = log_delay + video_time
+log_time = log_delay + video_time * scale
 ```
+
+`scale` defaults to `1.0` (no drift) and, for most flights, stays close to it.
 
 **Raising the log delay moves the telemetry later in the log for the same point in the
 video** — video time zero is matched against a log time further into the flight, so
@@ -510,19 +544,27 @@ video time zero against an earlier log time, so the overlay shows something that
 happened earlier (it *lags* the picture). To fix a mismatch: overlay ahead of the
 picture → lower the log delay; overlay lagging the picture → raise it.
 
-The easiest way to find it: read off the timestamp of a recognisable event (the moment
-of rotation on takeoff, a sharp roll, touchdown) both from the video and from the log,
-and give the pair to `--anchor-video-time`/`--anchor-log-time` — the log delay is
-computed for you, no mental subtraction required. `probe` prints the range of log delays
-for which the clip fits inside the log, useful as a sanity check on the result. From
-there, refine by rendering frames and nudging the log delay directly with `--log-delay`
-until the overlay matches the picture exactly (see [Step 3](#step-3--refine-the-log-delay-frame-by-frame)
-of the tutorial).
+The easiest way to find the log delay: read off the timestamp of a recognisable event
+(the moment of rotation on takeoff, a sharp roll, touchdown) both from the video and from
+the log, and give the pair to `--anchor-video-time`/`--anchor-log-time` — the log delay
+is computed for you, no mental subtraction required. `probe` prints the range of log
+delays for which the clip fits inside the log, useful as a sanity check on the result.
+From there, refine by rendering frames and nudging the log delay directly with
+`--log-delay` until the overlay matches the picture exactly (see
+[Step 3](#step-3--refine-the-log-delay-frame-by-frame) of the tutorial).
 
-Store it next to the video with `--save-sync`, which writes `flight.sync.json` (with the
-anchor pair alongside the log delay, if that is what you used, so the file stays
-readable and re-editable); later commands pick it up automatically when `--log-delay`
-and `--anchor-*` are both omitted.
+Scale needs two points, far apart in the video, to be measurable at all — a single
+anchor cannot tell drift from a plain offset. [`autosync`](#autosync--suggest-a-log-delay-and-clock-drift-scale)
+does this for you: it correlates several windows spread across the video and fits both
+log delay and scale through the ones it trusts. If you match a log delay by eye at one
+point in the video and the overlay is still off at another point several minutes away,
+that mismatch is what `scale` is for — either run `autosync` across both points, or set
+`--time-scale` directly if you already have a number.
+
+Store the result next to the video with `--save-sync`, which writes `flight.sync.json`
+(with the anchor pair alongside the log delay, if that is what you used, so the file
+stays readable and re-editable); later commands pick it up automatically when
+`--log-delay`, `--anchor-*` and `--time-scale` are all omitted.
 
 The log delay lives apart from the preset on purpose: a preset describes a *look* and is
 reused across flights, while a log delay belongs to one video/log pair.

@@ -95,6 +95,17 @@ def estimate_log_delay(
     video_rate, analysed, frames = _video_roll_rate(
         Path(video), info, options, progress
     )
+    gate = _quality_gate(video_rate, analysed, frames)
+    if gate is not None:
+        return gate
+
+    return _correlate(video_rate, info, roll, options, analysed, frames)
+
+
+def _quality_gate(
+    video_rate: np.ndarray, analysed: float, frames: int
+) -> AutoSyncResult | None:
+    """An early-out result for a slice not worth correlating, or ``None`` to proceed."""
     if frames < 30:
         return AutoSyncResult(
             0.0, 0.0, 0.0, analysed, frames, "too few frames could be analysed"
@@ -108,8 +119,359 @@ def estimate_log_delay(
             frames,
             "the image barely rotates in this window: pick a section with manoeuvres",
         )
+    return None
 
-    return _correlate(video_rate, info, roll, options, analysed, frames)
+
+@dataclass
+class SyncFitOptions:
+    """How to spread the per-window correlations that :func:`estimate_sync` fits."""
+
+    #: Video span to spread windows across.
+    start: float = 0.0
+    end: float | None = None
+    #: Number of windows. 1 disables the scale fit (behaves like ``estimate_log_delay``).
+    n_windows: int = 6
+    #: Duration of each window, in seconds.
+    window_length: float = 20.0
+    #: Log delays searched, in seconds, relative to the log's own timeline. Applied to
+    #: every window.
+    search_min: float | None = None
+    search_max: float | None = None
+    analysis_width: int = 480
+    max_features: int = 250
+    collect_diagnostics: bool = False
+    #: Minimum number of trustworthy windows needed to fit a scale. A 2-point line fits
+    #: any two windows exactly (zero residual by construction), so it cannot tell a real
+    #: fit from two coincidentally-matching false peaks -- 3 is the minimum that leaves
+    #: a degree of freedom for the residual check below to mean anything.
+    min_windows_for_scale: int = 3
+    #: Minimum fraction of the requested span the used windows must cover for the
+    #: slope (scale) to be trusted.
+    min_span_fraction: float = 0.25
+    #: Residual standard deviation, in seconds, above which the fit is flagged.
+    max_residual_std: float = 0.15
+    #: Clock drift this large is physically implausible for a few minutes of footage
+    #: (real values seen so far are ~1e-3); a fit landing outside this is almost
+    #: certainly a mismatch between windows, not real drift.
+    max_scale_deviation: float = 0.05
+    #: How far (in seconds) a window's log delay may sit from the RANSAC line and still
+    #: count as agreeing with it.
+    ransac_tolerance: float = 0.2
+
+
+@dataclass
+class WindowFit:
+    start: float
+    result: AutoSyncResult
+    used: bool = False
+
+
+@dataclass
+class SyncFitResult:
+    log_delay: float
+    scale: float
+    windows: list[WindowFit]
+    residual_std: float
+    span_covered: float
+    warning: str = ""
+
+    @property
+    def used(self) -> list[WindowFit]:
+        return [w for w in self.windows if w.used]
+
+    @property
+    def trustworthy(self) -> bool:
+        return not self.warning
+
+
+def estimate_sync(
+    video: str | Path,
+    telemetry: TelemetryLog,
+    options: SyncFitOptions | None = None,
+    *,
+    info: VideoInfo | None = None,
+    progress: Callable[[float], None] | None = None,
+) -> SyncFitResult:
+    """Estimate both log delay and clock-drift scale.
+
+    Runs the optical flow *once*, continuously across the whole requested span, then
+    picks the ``n_windows`` sub-slices where the image actually rotates the most --
+    footage of calm cruise or straight legs cannot correlate against anything, so there
+    is no point spending a window on it. Each selected slice is correlated against the
+    log (the same :func:`_correlate` used by :func:`estimate_log_delay`); the results
+    are then combined by :func:`_fit_sync`, which fits ``log_delay_i = log_delay +
+    (scale - 1) * start_i`` through whichever slices agree with each other. A single
+    window (``n_windows == 1``) degrades to the old, single-slice behaviour with
+    ``scale`` fixed at 1.0.
+    """
+    options = options or SyncFitOptions()
+    info = info or probe_video(video)
+    roll = telemetry.channel(fields.ROLL)
+    if roll is None or len(roll) < 10:
+        return SyncFitResult(0.0, 1.0, [], 0.0, 0.0, "the log has no attitude data")
+
+    end = options.end if options.end is not None else info.duration
+    n_windows = max(1, options.n_windows)
+
+    scan_options = AutoSyncOptions(
+        window=max(0.0, end - options.start),
+        start=options.start,
+        analysis_width=options.analysis_width,
+        search_min=options.search_min,
+        search_max=options.search_max,
+        max_features=options.max_features,
+        collect_diagnostics=options.collect_diagnostics,
+    )
+    video_rate, analysed, frames = _video_roll_rate(Path(video), info, scan_options, progress)
+    gate = _quality_gate(video_rate, analysed, frames)
+    if gate is not None:
+        return SyncFitResult(0.0, 1.0, [], 0.0, 0.0, gate.warning)
+
+    dt = info.frame_interval
+    if n_windows == 1:
+        result = _correlate(video_rate, info, roll, scan_options, analysed, frames)
+        windows = [WindowFit(start=options.start, result=result, used=result.trustworthy)]
+        return SyncFitResult(
+            log_delay=result.log_delay,
+            scale=1.0,
+            windows=windows,
+            residual_std=0.0,
+            span_covered=0.0,
+            warning=result.warning,
+        )
+
+    length = max(1, int(round(options.window_length / dt)))
+    indices = _select_active_windows(video_rate, length, n_windows, min_gap=length)
+
+    windows = []
+    for idx in indices:
+        window_start = options.start + idx * dt
+        slice_rate = video_rate[idx : idx + length]
+        window_options = AutoSyncOptions(
+            window=options.window_length,
+            start=window_start,
+            search_min=options.search_min,
+            search_max=options.search_max,
+            collect_diagnostics=options.collect_diagnostics,
+        )
+        window_analysed = len(slice_rate) * dt
+        window_gate = _quality_gate(slice_rate, window_analysed, len(slice_rate))
+        result = window_gate or _correlate(
+            slice_rate, info, roll, window_options, window_analysed, len(slice_rate)
+        )
+        windows.append(WindowFit(start=window_start, result=result))
+
+    return _fit_sync(windows, options)
+
+
+def _select_active_windows(
+    video_rate: np.ndarray, length: int, n_windows: int, *, min_gap: int
+) -> list[int]:
+    """Start indices of the ``n_windows`` slices of ``video_rate`` with the most energy.
+
+    Picks greedily by descending sliding RMS, skipping any candidate closer than
+    ``min_gap`` samples to one already chosen, so the picks stay non-overlapping and
+    spread out (needed for the scale fit) instead of clustering on one long manoeuvre.
+    """
+    if len(video_rate) < length:
+        return [0]
+    sq = video_rate.astype(np.float64) ** 2
+    cumsum = np.cumsum(np.insert(sq, 0, 0.0))
+    energy = cumsum[length:] - cumsum[:-length]
+    order = np.argsort(energy)[::-1]
+
+    chosen: list[int] = []
+    for idx in order:
+        idx = int(idx)
+        if all(abs(idx - c) >= min_gap for c in chosen):
+            chosen.append(idx)
+        if len(chosen) >= n_windows:
+            break
+    return sorted(chosen)
+
+
+def _fit_sync(windows: list[WindowFit], options: SyncFitOptions) -> SyncFitResult:
+    trustworthy = [w for w in windows if w.result.trustworthy]
+    if len(trustworthy) < options.min_windows_for_scale:
+        # Prefer an actually-trustworthy window over one with a merely higher raw
+        # correlation: a low-confidence window can score higher than a distinct,
+        # trustworthy peak elsewhere (see the non-stationary-log case this guards
+        # against in `_sliding_normalised_correlation`).
+        best = max(trustworthy or windows, key=lambda w: w.result.correlation)
+        best.used = best.result.trustworthy
+        return SyncFitResult(
+            log_delay=best.result.log_delay,
+            scale=1.0,
+            windows=windows,
+            residual_std=0.0,
+            span_covered=0.0,
+            warning=(
+                f"only {len(trustworthy)} trustworthy window(s) (need "
+                f"{options.min_windows_for_scale}): scale kept at 1.0, log delay from "
+                "the single best window -- try --windows more spread out, a longer "
+                "--window-length, or a span with more manoeuvres"
+            ),
+        )
+
+    starts = np.array([w.start for w in trustworthy])
+    delays = np.array([w.result.log_delay for w in trustworthy])
+    weights = np.array([w.result.correlation for w in trustworthy])
+
+    inliers = _ransac_inliers(starts, delays, options)
+    if inliers is None or int(inliers.sum()) < options.min_windows_for_scale:
+        best = max(trustworthy, key=lambda w: w.result.correlation)
+        best.used = True
+        agreement = 0 if inliers is None else int(inliers.sum())
+        return SyncFitResult(
+            log_delay=best.result.log_delay,
+            scale=1.0,
+            windows=windows,
+            residual_std=0.0,
+            span_covered=0.0,
+            warning=(
+                "no consistent (log delay, scale) line fits enough trustworthy windows "
+                f"(best agreement: {agreement} of {len(trustworthy)}): they likely "
+                "matched different manoeuvres, not the same one at different times -- "
+                "scale kept at 1.0, log delay from the single best window"
+            ),
+        )
+
+    for w, is_inlier in zip(trustworthy, inliers):
+        w.used = bool(is_inlier)
+
+    slope, intercept = np.polyfit(starts[inliers], delays[inliers], 1, w=weights[inliers])
+    scale = 1.0 + float(slope)
+    log_delay = float(intercept)
+
+    residuals = delays[inliers] - (intercept + slope * starts[inliers])
+    residual_std = float(np.sqrt(np.average(residuals**2, weights=weights[inliers])))
+
+    requested_span = max(w.start for w in windows) - min(w.start for w in windows)
+    span_covered = float(starts[inliers].max() - starts[inliers].min())
+    span_fraction = span_covered / requested_span if requested_span > 0 else 0.0
+
+    warning = ""
+    if abs(scale - 1.0) > options.max_scale_deviation:
+        warning = (
+            f"fitted scale {scale:.5f} is not physically plausible for clock drift: "
+            "the agreeing windows likely matched the same wrong manoeuvre -- check the "
+            "per-window table by eye"
+        )
+    elif span_fraction < options.min_span_fraction:
+        warning = (
+            f"the windows that agree with each other only cover {span_covered:.0f}s of "
+            f"the {requested_span:.0f}s span: the scale estimate is likely unreliable -- "
+            "spread --from/--to wider or add windows"
+        )
+    elif residual_std > options.max_residual_std:
+        warning = (
+            f"the fit does not line up well (residual {residual_std * 1000:.0f}ms): "
+            "check the per-window table, one window may be off -- verify by eye"
+        )
+
+    return SyncFitResult(
+        log_delay=log_delay,
+        scale=scale,
+        windows=windows,
+        residual_std=residual_std,
+        span_covered=span_covered,
+        warning=warning,
+    )
+
+
+def _ransac_inliers(
+    starts: np.ndarray, delays: np.ndarray, options: SyncFitOptions
+) -> np.ndarray | None:
+    """Boolean mask of the trustworthy windows lying on the best-supported line.
+
+    A window can be individually trustworthy (a distinct, confident correlation peak)
+    and still have matched the wrong occurrence of a repeating manoeuvre -- especially
+    once window placement is biased towards the most active parts of the video, where
+    similar-looking manoeuvres cluster. Fitting one line through every trustworthy point
+    (a plain weighted regression) would let a single such mismatch corrupt the whole
+    scale estimate. Instead, try every pair of points, count how many of the rest agree
+    with the line through that pair within ``ransac_tolerance``, and keep the
+    best-supported line's agreeing points. Cheap: with a handful of windows this is at
+    most a few dozen pairs.
+    """
+    n = len(starts)
+    best_inliers: np.ndarray | None = None
+    best_count = 0
+    for i in range(n):
+        for j in range(i + 1, n):
+            if starts[j] == starts[i]:
+                continue
+            slope = (delays[j] - delays[i]) / (starts[j] - starts[i])
+            if abs(slope) > options.max_scale_deviation:
+                continue
+            intercept = delays[i] - slope * starts[i]
+            residuals = np.abs(delays - (intercept + slope * starts))
+            inliers = residuals <= options.ransac_tolerance
+            count = int(inliers.sum())
+            if count > best_count:
+                best_count = count
+                best_inliers = inliers
+    return best_inliers
+
+
+def save_fit_plot(
+    result: SyncFitResult,
+    output_dir: Path,
+    *,
+    filename: str = "autosync_fit.png",
+) -> Path:
+    """Per-window log delay vs. window start, with the fitted line.
+
+    Makes the drift the scale corrects for visible: if the points trend up or down
+    instead of sitting flat, ``scale`` is not 1.0 and the plot shows by how much.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    used = [w for w in result.windows if w.used]
+    unused = [w for w in result.windows if not w.used]
+    if unused:
+        ax.scatter(
+            [w.start for w in unused],
+            [w.result.log_delay for w in unused],
+            color="tab:gray",
+            marker="x",
+            label="discarded window",
+        )
+    if used:
+        ax.scatter(
+            [w.start for w in used],
+            [w.result.log_delay for w in used],
+            color="tab:blue",
+            label="trustworthy window",
+        )
+    if len(used) >= 2:
+        starts = np.array([w.start for w in result.windows])
+        lo, hi = float(starts.min()), float(starts.max())
+        xs = np.linspace(lo, hi, 50)
+        ax.plot(
+            xs,
+            result.log_delay + (result.scale - 1.0) * xs,
+            color="tab:orange",
+            label=f"fit (scale={result.scale:.5f})",
+        )
+
+    ax.set_title("Per-window log delay vs. video time")
+    ax.set_xlabel("video window start [s]")
+    ax.set_ylabel("estimated log delay [s]")
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+
+    fig.tight_layout()
+    path = output_dir / filename
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    return path
 
 
 def compute_manual_diagnostics(
@@ -253,14 +615,12 @@ def _correlate(
     log_times, log_roll, log_rate = _log_roll_signal(roll, dt)
 
     a = _normalise(video_rate)
-    b = _normalise(log_rate)
-    if a is None or b is None:
+    if a is None or not np.any(np.abs(log_rate - log_rate.mean()) > 1e-9):
         return AutoSyncResult(
             0.0, 0.0, 0.0, analysed, frames, "one of the signals is flat"
         )
 
-    # Correlation of the (shorter) video signal against the whole log.
-    correlation = np.correlate(b, a, mode="valid") / len(a)
+    correlation = _sliding_normalised_correlation(log_rate, a)
     if correlation.size == 0:
         return AutoSyncResult(
             0.0, 0.0, 0.0, analysed, frames, "the analysed window is longer than the log"
@@ -271,10 +631,15 @@ def _correlate(
     # log. Without this the peak can land somewhere that leaves the clip hanging off
     # the end of the flight -- an answer that is impossible rather than merely wrong.
     lo, hi = _default_search_range(roll, options)
+    # ``lags`` are log times at which the *window* begins, but ``search_min``/``search_max``
+    # are documented (and used elsewhere, e.g. ``probe``'s "valid log delays") as bounds on
+    # the log delay -- the log time matching *video time zero*. Translate by the window's
+    # own start so a fixed pair of bounds means the same thing regardless of where in the
+    # clip the window sits (needed for windows spread across a clip in `estimate_sync`).
     if options.search_min is not None:
-        lo = options.search_min
+        lo = options.search_min + options.start
     if options.search_max is not None:
-        hi = options.search_max
+        hi = options.search_max + options.start
     window = (lags >= lo) & (lags <= hi)
     if not window.any():
         return AutoSyncResult(
@@ -352,15 +717,16 @@ def save_diagnostic_plots(
     log_delay: float,
     output_dir: Path,
     *,
+    scale: float = 1.0,
     filename: str = "autosync_diagnostics.png",
     xlim: tuple[float, float] | None = None,
 ) -> Path:
     """Save the signals behind a sync estimate as one two-panel PNG.
 
-    ``log_delay`` shifts the video times onto the log's timebase (``log_time =
-    log_delay + video_time``), so the two roll-rate traces in the bottom panel line up
-    the way the estimate claims they do. ``xlim``, in log seconds, crops both panels to
-    a range of interest (e.g. the slice a manual sync was checked against).
+    ``log_delay``/``scale`` shift the video times onto the log's timebase (``log_time =
+    log_delay + video_time * scale``), so the two roll-rate traces in the bottom panel
+    line up the way the estimate claims they do. ``xlim``, in log seconds, crops both
+    panels to a range of interest (e.g. the slice a manual sync was checked against).
     """
     import matplotlib
 
@@ -383,7 +749,7 @@ def save_diagnostic_plots(
         label="log roll rate",
     )
     ax_rate.plot(
-        diagnostics.video_times + log_delay,
+        log_delay + diagnostics.video_times * scale,
         diagnostics.video_roll_rate,
         linewidth=0.8,
         color="tab:orange",
@@ -402,7 +768,7 @@ def save_diagnostic_plots(
             ax_rate,
             [
                 (diagnostics.log_times, diagnostics.log_roll_rate),
-                (diagnostics.video_times + log_delay, diagnostics.video_roll_rate),
+                (log_delay + diagnostics.video_times * scale, diagnostics.video_roll_rate),
             ],
             xlim,
         )
@@ -421,3 +787,38 @@ def _normalise(signal: np.ndarray) -> np.ndarray | None:
     if norm < 1e-9:
         return None
     return centred / norm
+
+
+def _sliding_normalised_correlation(log_rate: np.ndarray, a: np.ndarray) -> np.ndarray:
+    """Pearson correlation of ``a`` (already zero-mean/unit-variance) against every
+    length-``len(a)`` slice of ``log_rate``, normalised *locally* per slice.
+
+    A flight log is rarely stationary: a calm cruise and a violent aerobatic segment can
+    sit in the same file. Normalising ``log_rate`` once, globally, before correlating (as
+    a plain ``np.correlate`` would) lets the highest-amplitude segment of the log
+    dominate the raw dot product at *every* lag, regardless of true alignment -- the
+    correlation score ends up systematically pulled towards that segment no matter which
+    part of the video is being matched. Normalising per-slice (i.e. by that slice's own
+    standard deviation) keeps the score a true correlation coefficient, bounded to
+    [-1, 1], comparable across lags independent of local signal energy.
+    """
+    length = len(a)
+    if len(log_rate) < length:
+        return np.array([])
+
+    dot = np.correlate(log_rate, a, mode="valid")
+    cumsum = np.cumsum(np.insert(log_rate.astype(np.float64), 0, 0.0))
+    cumsum2 = np.cumsum(np.insert(log_rate.astype(np.float64) ** 2, 0, 0.0))
+    total = cumsum[length:] - cumsum[:-length]
+    total_sq = cumsum2[length:] - cumsum2[:-length]
+    mean = total / length
+    variance = np.maximum(total_sq / length - mean**2, 0.0)
+    std = np.sqrt(variance)
+
+    # ``a`` is zero-mean, so subtracting the slice's mean from ``log_rate`` before the dot
+    # product would not change it; only the local std is needed to turn the raw dot
+    # product into a coefficient.
+    correlation = np.zeros_like(dot)
+    valid = std > 1e-9
+    correlation[valid] = dot[valid] / (length * std[valid])
+    return correlation

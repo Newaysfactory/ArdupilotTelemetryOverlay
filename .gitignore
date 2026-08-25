@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 *.npz
 *.egg-info/
+todo.txt
 
 # Generated output
 out/

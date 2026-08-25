@@ -61,17 +61,36 @@ def build_parser() -> argparse.ArgumentParser:
     frame.set_defaults(func=cmd_frame)
 
     autosync = subparsers.add_parser(
-        "autosync", help="suggest a log delay by correlating image and log roll rate"
+        "autosync",
+        help="suggest a log delay and clock-drift scale by correlating image and log "
+        "roll rate",
     )
     _add_common(autosync, with_log_delay=False)
     autosync.add_argument(
-        "--from", dest="start", type=float, default=0.0, help="video time to start at"
+        "--from",
+        dest="start",
+        type=float,
+        default=0.0,
+        help="video time to start spreading windows from",
     )
     autosync.add_argument(
         "--to",
         dest="end",
         type=float,
-        help="video time to stop at (default: 60s after --from)",
+        help="video time to stop spreading windows at (default: end of video)",
+    )
+    autosync.add_argument(
+        "--windows",
+        type=int,
+        default=6,
+        help="number of analysis windows spread across --from/--to; 1 disables the "
+        "scale fit and keeps scale at 1.0 (old behaviour)",
+    )
+    autosync.add_argument(
+        "--window-length",
+        type=float,
+        default=20.0,
+        help="duration of each analysis window, in seconds",
     )
     autosync.add_argument(
         "--search-min", type=float, help="earliest log time to consider"
@@ -80,13 +99,14 @@ def build_parser() -> argparse.ArgumentParser:
     autosync.add_argument(
         "--write",
         action="store_true",
-        help="write the estimate to the video's .sync.json (never automatic)",
+        help="write the estimate (log delay and scale) to the video's .sync.json "
+        "(never automatic)",
     )
     autosync.add_argument(
         "--plot",
         type=Path,
-        help="save diagnostic plots (video roll rate, log roll rate, log roll) "
-        "to this directory",
+        help="save diagnostic plots (per-window roll rate and, with --windows > 1, "
+        "the delay-vs-time fit) to this directory",
     )
     autosync.set_defaults(func=cmd_autosync)
 
@@ -186,6 +206,15 @@ def _add_sync_args(parser: argparse.ArgumentParser) -> None:
         dest="anchor_log_time",
         type=float,
         help="log time, in seconds, of the same moment given in --anchor-video-time",
+    )
+    parser.add_argument(
+        "--time-scale",
+        dest="scale",
+        type=float,
+        help="clock-drift scale, log_time = log_delay + video_time * scale (advanced; "
+        "default 1.0, or from autosync's estimate); combines with either --log-delay "
+        "or the --anchor-* pair. Not to be confused with export's --scale, which "
+        "downscales the video frame",
     )
 
 
@@ -321,24 +350,27 @@ def cmd_frame(args: argparse.Namespace) -> int:
 
 
 def cmd_autosync(args: argparse.Namespace) -> int:
-    from .autosync import AutoSyncOptions, estimate_log_delay
+    from .autosync import SyncFitOptions, estimate_sync
     from .video.probe import probe_video
 
     info = probe_video(args.video)
     log = read_log(args.log, progress=_note)
-    window = (args.end - args.start) if args.end is not None else 60.0
-    options = AutoSyncOptions(
-        window=window,
+    options = SyncFitOptions(
         start=args.start,
+        end=args.end,
+        n_windows=args.windows,
+        window_length=args.window_length,
         search_min=args.search_min,
         search_max=args.search_max,
         collect_diagnostics=bool(args.plot),
     )
+    end = args.end if args.end is not None else info.duration
     print(
-        f"analysing {options.window:.0f}s of video from {options.start:.0f}s "
+        f"analysing {options.n_windows} window(s) of {options.window_length:.0f}s "
+        f"spread over {args.start:.0f}s -> {end:.0f}s of video "
         "(optical flow vs logged roll rate)..."
     )
-    result = estimate_log_delay(
+    result = estimate_sync(
         args.video,
         log,
         options,
@@ -346,32 +378,53 @@ def cmd_autosync(args: argparse.Namespace) -> int:
         progress=lambda f: _progress_bar("  tracking", f),
     )
     print()
+    if len(result.windows) > 1:
+        print("  window start   log delay   correlation  confidence  used")
+        for w in result.windows:
+            print(
+                f"  {w.start:9.1f}s  {w.result.log_delay:10.3f}s  "
+                f"{w.result.correlation:11.3f}  {w.result.confidence:9.2f}x  "
+                f"{'yes' if w.used else 'no'}"
+            )
+        print()
     if result.warning:
         print(f"  warning: {result.warning}")
     print(f"  estimated log delay: {result.log_delay:.3f} s")
-    print(f"  correlation      : {result.correlation:.3f} (1.0 = perfect)")
-    print(f"  peak distinctness: {result.confidence:.2f}x the runner-up")
-    print(f"  analysed         : {result.analysed:.1f}s, {result.samples} frame pairs")
+    print(f"  estimated scale    : {result.scale:.5f}")
+    if len(result.windows) > 1:
+        print(f"  fit residual       : {result.residual_std * 1000:.0f} ms")
+        print(f"  span covered       : {result.span_covered:.0f} s")
     print(
-        "  verdict          : "
+        "  verdict            : "
         + ("looks trustworthy" if result.trustworthy else "check it by eye")
     )
     print(
         f"\n  verify with: telemetry-overlay frame {args.video} {args.log} "
-        f"--log-delay {result.log_delay:.3f} --at {args.start + 5:.0f}"
+        f"--log-delay {result.log_delay:.3f} --time-scale {result.scale:.5f} "
+        f"--at {args.start + 5:.0f}"
     )
     if args.write:
-        sync = SyncModel(log_delay=result.log_delay, note="autosync")
+        sync = SyncModel(log_delay=result.log_delay, scale=result.scale, note="autosync")
         path = sync.save(SyncModel.path_for(args.video))
         print(f"  written to {path}")
     if args.plot:
-        from .autosync import save_diagnostic_plots
+        from .autosync import save_diagnostic_plots, save_fit_plot
 
-        if result.diagnostics is None:
-            print("  no plot: the estimate failed before the signals were computed")
+        if len(result.windows) > 1:
+            path = save_fit_plot(result, args.plot)
+            print(f"  fit plot written to {path}")
+        if not result.windows:
+            print("  no per-window plot: the estimate failed before any window was analysed")
         else:
-            path = save_diagnostic_plots(result.diagnostics, result.log_delay, args.plot)
-            print(f"  plot written to {path}")
+            trustworthy = [w for w in result.windows if w.result.trustworthy]
+            best = max(trustworthy or result.windows, key=lambda w: w.result.correlation)
+            if best.result.diagnostics is None:
+                print("  no per-window plot: the estimate failed before the signals were computed")
+            else:
+                path = save_diagnostic_plots(
+                    best.result.diagnostics, best.result.log_delay, args.plot
+                )
+                print(f"  best-window plot written to {path}")
     return 0
 
 
@@ -396,11 +449,12 @@ def cmd_manualsync(args: argparse.Namespace) -> int:
         progress=lambda f: _progress_bar("  tracking", f),
     )
     print()
-    xlim = (sync.log_delay + args.start, sync.log_delay + args.end)
+    xlim = (sync.log_time(args.start), sync.log_time(args.end))
     path = save_diagnostic_plots(
         diagnostics,
         sync.log_delay,
         args.plot,
+        scale=sync.scale,
         filename="manualsync_diagnostics.png",
         xlim=xlim,
     )
@@ -483,6 +537,7 @@ def _sync_from_cli(args: argparse.Namespace) -> SyncModel | None:
     anchor_video_time = getattr(args, "anchor_video_time", None)
     anchor_log_time = getattr(args, "anchor_log_time", None)
     log_delay = getattr(args, "log_delay", None)
+    scale = getattr(args, "scale", None)
     if (anchor_video_time is None) != (anchor_log_time is None):
         raise ValueError(
             "--anchor-video-time and --anchor-log-time must be given together"
@@ -493,12 +548,23 @@ def _sync_from_cli(args: argparse.Namespace) -> SyncModel | None:
                 "use either --log-delay or --anchor-video-time/--anchor-log-time, not both"
             )
         sync = SyncModel.from_anchors(
-            anchor_video_time, anchor_log_time, note="command line anchors"
+            anchor_video_time,
+            anchor_log_time,
+            scale=scale if scale is not None else 1.0,
+            note="command line anchors",
         )
         _note(f"{_describe_sync(sync)} (from the anchors given on the command line)")
         return sync
     if log_delay is not None:
-        return SyncModel(log_delay=log_delay, note="command line")
+        return SyncModel(
+            log_delay=log_delay, scale=scale if scale is not None else 1.0,
+            note="command line",
+        )
+    if scale is not None:
+        raise ValueError(
+            "--time-scale needs either --log-delay or --anchor-video-time/"
+            "--anchor-log-time alongside it"
+        )
     return None
 
 
@@ -520,12 +586,13 @@ def _resolve_sync(args: argparse.Namespace, video: Path) -> SyncModel:
 
 
 def _describe_sync(sync: SyncModel) -> str:
+    scale = f"  scale {sync.scale:.5f}" if sync.scale != 1.0 else ""
     if sync.anchor_video_time is not None:
         return (
-            f"log delay {sync.log_delay:+.3f}s  (anchor: video "
+            f"log delay {sync.log_delay:+.3f}s{scale}  (anchor: video "
             f"{sync.anchor_video_time:.3f}s = log {sync.anchor_log_time:.3f}s)"
         )
-    return f"log delay {sync.log_delay:+.3f}s"
+    return f"log delay {sync.log_delay:+.3f}s{scale}"
 
 
 def _fmt(value: float | None) -> str:
