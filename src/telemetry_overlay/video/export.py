@@ -45,7 +45,7 @@ class ExportOptions:
     quality: int | None = None
     #: Trim window in video time, in seconds. ``None`` means the whole clip.
     start: float | None = None
-    duration: float | None = None
+    end: float | None = None
     #: Downscale factor applied to the output frame, e.g. 0.5 for half resolution.
     #: ``None`` or 1.0 keeps the source size. Meant for fast draft exports; the HUD
     #: renders correctly at any size because element geometry is frame-relative.
@@ -240,10 +240,10 @@ def export_video(
 
 def _frame_range(info: VideoInfo, options: ExportOptions) -> tuple[int, int]:
     first = info.frame_index_at(options.start) if options.start else 0
-    if options.duration is None:
+    if options.end is None:
         return first, info.frame_count - 1
-    span = max(1, int(round(options.duration * float(info.frame_rate))))
-    return first, min(info.frame_count - 1, first + span - 1)
+    last = info.frame_index_at(options.end)
+    return first, max(first, last)
 
 
 def _display_size(info: VideoInfo) -> tuple[int, int]:
