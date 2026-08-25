@@ -19,15 +19,185 @@ python -m venv .venv
 No external FFmpeg installation is needed: PyAV bundles a complete FFmpeg build,
 including the NVENC hardware encoders.
 
-Optionally install the package to get the `telemetry-overlay` command on your PATH:
+## How to run the command
+
+There is no `telemetry-overlay` file in the project root: it is a console script that
+only exists once the package is installed into the virtualenv. Pick one of the two forms
+below — every example in this README writes `telemetry-overlay`, and you substitute
+whichever you chose.
+
+**Installed (recommended).** Install the package once, in editable mode, and the command
+becomes available inside the virtualenv:
 
 ```bash
-.venv/Scripts/python.exe -m pip install -e .
+.venv/Scripts/python.exe -m pip install -e .      # Windows
+# or: .venv/bin/pip install -e .
 ```
 
-Without installing, use `python -m telemetry_overlay` with `PYTHONPATH=src`.
+Then, from the project root:
+
+```powershell
+.venv\Scripts\telemetry-overlay.exe probe "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin"
+```
+
+Activating the venv (`.venv\Scripts\Activate.ps1`, or `source .venv/bin/activate`) lets
+you drop the path and type `telemetry-overlay` directly.
+
+**Without installing.** Run the package as a module, telling Python where the sources
+are. From the project root:
+
+```powershell
+$env:PYTHONPATH = "src"
+.venv\Scripts\python.exe -m telemetry_overlay probe "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin"
+```
+
+```bash
+# bash / Linux / macOS equivalent
+PYTHONPATH=src .venv/bin/python -m telemetry_overlay probe data/flight.MP4 data/flight.bin
+```
+
+`$env:PYTHONPATH` lasts for the current shell session only, so set it once per terminal.
+Note the quotes: paths containing spaces — like the sample log — need them.
+
+## Tutorial: from a `.bin` and a video to a finished clip
+
+A full pass, in order. The numbers below are from the sample flight in `data/`; substitute
+your own. Every command is idempotent, so repeat any step as often as you like.
+
+The examples are written as `telemetry-overlay <args>` for readability. That is not a file
+in the project root — replace it with whichever invocation you picked in
+[How to run the command](#how-to-run-the-command), i.e. either
+`.venv\Scripts\telemetry-overlay.exe` or `.venv\Scripts\python.exe -m telemetry_overlay`
+with `PYTHONPATH=src` set.
+
+### Step 1 — look at both files
+
+```bash
+telemetry-overlay probe flight.MP4 flight.bin
+```
+
+Against the sample data, in PowerShell from the project root, that is:
+
+```powershell
+$env:PYTHONPATH = "src"
+.venv\Scripts\python.exe -m telemetry_overlay probe "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin"
+```
+
+Write down three things from the output:
+
+- the **video duration** (sample: `224.8s`);
+- the **log window**, in flight-controller seconds (sample: `171.7s -> 640.6s`) and the
+  arming time (`181.8s`);
+- the line `valid offsets run from 171.7 to 415.9` — any offset outside that range would
+  place part of the clip outside the log, so it is wrong by definition.
+
+Also check that every channel you care about was found, and that an encoder is marked
+`yes`. On a machine without an NVIDIA GPU only the software encoders will be available;
+that is fine, just slower.
+
+### Step 2 — get a rough offset
+
+The offset is the log time that corresponds to **video time zero**. Do not compute it
+from file timestamps: the camera clock is unreliable. Instead pick one event you can see
+in the video *and* find in the log, and subtract.
+
+The easiest event is the start of the takeoff roll. Say it happens 40 s into the video,
+and the log shows the AUTO takeoff at 215 s:
+
+```
+offset = 215 - 40 = 175
+```
+
+If you cannot spot such an event, let `autosync` propose a starting point — it is a
+suggestion, never the answer:
+
+```bash
+telemetry-overlay autosync flight.MP4 flight.bin --from 60 --window 60 \
+    --search-min 171.7 --search-max 415.9
+```
+
+Pass `--from`/`--window` a stretch of video with real turns in it, and bound the search
+with the offset range `probe` printed. Read the confidence score: a low one means the
+footage did not correlate, not that the number is nearly right.
+
+### Step 3 — refine the offset frame by frame
+
+Render single frames at a moment whose true state you know, and adjust the offset until
+the overlay agrees with the picture:
+
+```bash
+telemetry-overlay frame flight.MP4 flight.bin --at 40 --offset 175 -o out/f.png
+```
+
+Look at the frame, then correct. The relationship is worth internalising:
+
+- overlay is **ahead** of the picture (already climbing while the aircraft is still on
+  the ground) → **lower** the offset;
+- overlay **lags** the picture → **raise** the offset.
+
+Iterate in shrinking steps — ±5 s, then ±1 s, then ±0.2 s. The horizon is the most
+sensitive check: at a sharp roll, an error of half a second is obvious. Speed and altitude
+change too slowly to sync against.
+
+```bash
+telemetry-overlay frame flight.MP4 flight.bin --at 40 --offset 173 -o out/f.png
+telemetry-overlay frame flight.MP4 flight.bin --at 40 --offset 171.8 -o out/f.png
+```
+
+Then verify at a *second*, distant moment — the landing, for instance. If the first point
+matches and a point four minutes later does not, the two clocks are drifting, which is
+what the `scale` field in the sync file is for.
+
+### Step 4 — save the offset
+
+Once you are happy, store it beside the video:
+
+```bash
+telemetry-overlay frame flight.MP4 flight.bin --at 40 --offset 171.8 --save-sync
+```
+
+That writes `flight.sync.json`. From now on you can omit `--offset` entirely and every
+command will read it back.
+
+### Step 5 — adjust the look
+
+Copy the preset and edit the copy, checking each change with `frame` (about a second per
+render, no export needed):
+
+```bash
+cp presets/default.json presets/mine.json
+telemetry-overlay frame flight.MP4 flight.bin --at 120 -p presets/mine.json -o out/f.png
+```
+
+Positions are normalised (0..1) and sizes are fractions of frame height, so what you tune
+here holds at any resolution. See [Presets](#presets) for the fields. A good frame to
+work on is one where the aircraft is banked and messages are on screen.
+
+### Step 6 — export a short test segment
+
+Never go straight to the full clip. Render ten seconds first:
+
+```bash
+telemetry-overlay export flight.MP4 flight.bin -p presets/mine.json \
+    --start 210 --duration 10 -o out/test.mp4
+```
+
+`--start` and `--duration` are in video seconds. Watch it: check the sync at speed, that
+the audio is in place, and that nothing is clipped at the frame edges.
+
+### Step 7 — export the whole flight
+
+```bash
+telemetry-overlay export flight.MP4 flight.bin -p presets/mine.json -o flight_hud.mp4
+```
+
+Expect roughly 9 fps at 4K with the software encoder — about 12 minutes for a 4-minute
+clip — and far less with NVENC. Add `--encoder`/`--quality` to override the automatic
+choice, and `-y` to overwrite an existing output.
 
 ## Commands
+
+Reference for each subcommand; the tutorial above is the guided path.
 
 ### `probe` — see what you have
 
