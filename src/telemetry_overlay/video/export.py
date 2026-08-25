@@ -46,6 +46,10 @@ class ExportOptions:
     #: Trim window in video time, in seconds. ``None`` means the whole clip.
     start: float | None = None
     duration: float | None = None
+    #: Downscale factor applied to the output frame, e.g. 0.5 for half resolution.
+    #: ``None`` or 1.0 keeps the source size. Meant for fast draft exports; the HUD
+    #: renders correctly at any size because element geometry is frame-relative.
+    scale: float | None = None
     copy_audio: bool = True
     max_bands: int = 6
     overwrite: bool = False
@@ -120,7 +124,7 @@ def export_video(
     if total <= 0:
         raise ValueError("the requested trim window contains no frames")
 
-    display_w, display_h = _display_size(info)
+    display_w, display_h = _scaled_size(_display_size(info), options.scale)
     renderer = OverlayRenderer(
         preset, display_w, display_h, max_bands=options.max_bands
     )
@@ -143,7 +147,9 @@ def export_video(
     with av.open(str(video)) as container:
         stream = container.streams.video[0]
         stream.thread_type = "AUTO"
-        graph, video_input, band_inputs = _build_graph(stream, renderer, info)
+        graph, video_input, band_inputs = _build_graph(
+            stream, renderer, info, (display_w, display_h)
+        )
 
         with av.open(
             str(output), "w", options={"movflags": "+faststart"}
@@ -247,6 +253,17 @@ def _display_size(info: VideoInfo) -> tuple[int, int]:
     return info.width, info.height
 
 
+def _scaled_size(size: tuple[int, int], scale: float | None) -> tuple[int, int]:
+    """Apply the draft-export downscale, rounded to even (chroma subsampling)."""
+    if not scale or scale == 1.0:
+        return size
+    width, height = size
+    return (
+        max(2, int(round(width * scale / 2)) * 2),
+        max(2, int(round(height * scale / 2)) * 2),
+    )
+
+
 def _build_timeline(
     info: VideoInfo, telemetry: TelemetryLog, preset: Preset, sync: SyncModel
 ):
@@ -261,14 +278,22 @@ def _build_timeline(
     )
 
 
-def _build_graph(stream, renderer: OverlayRenderer, info: VideoInfo):
-    """Video -> [rotate] -> overlay per band -> yuv420p -> sink."""
+def _build_graph(
+    stream, renderer: OverlayRenderer, info: VideoInfo, display_size: tuple[int, int]
+):
+    """Video -> [rotate] -> [scale] -> overlay per band -> yuv420p -> sink."""
     graph = av.filter.Graph()
     video_input = graph.add_buffer(template=stream)
     node = video_input
 
     if info.rotation:
         node = _add_rotation(graph, node, info.rotation)
+
+    if display_size != _display_size(info):
+        width, height = display_size
+        scale_filter = graph.add("scale", f"{width}:{height}")
+        node.link_to(scale_filter)
+        node = scale_filter
 
     band_inputs = []
     for band in renderer.bands:

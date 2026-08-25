@@ -439,7 +439,7 @@ telemetry-overlay manualsync "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.b
 ```
 telemetry-overlay export <video> <log> [-p PRESET] [--offset SECONDS] [--save-sync]
     [-o PATH] [--start SECONDS] [--duration SECONDS]
-    [--encoder KEY] [--quality N] [--no-audio] [-y]
+    [--encoder KEY] [--quality N] [--scale FACTOR] [--no-audio] [-y]
 ```
 
 - `video`, `log` — required positionals.
@@ -451,15 +451,20 @@ telemetry-overlay export <video> <log> [-p PRESET] [--offset SECONDS] [--save-sy
   first, falling back to x264.
 - `--quality N` — CQ (NVENC) or CRF (x264/x265) value; lower is higher quality and a
   larger file. Default depends on the chosen encoder.
+- `--scale FACTOR` — downscale the output by this factor (e.g. `0.5` for half
+  resolution) for a fast draft export while iterating on a preset or a sync offset. The
+  HUD is unaffected: element geometry is frame-relative, so it renders correctly at any
+  size. Default: 1.0, the source resolution.
 - `--no-audio` — drop the audio track instead of copying it untouched.
 - `-y`, `--overwrite` — overwrite `--output` if it already exists; otherwise `export`
   refuses to clobber an existing file.
 
 ```bash
-# 10-second test segment first: seconds instead of minutes
-telemetry-overlay export flight.MP4 flight.bin --offset 250 --start 100 --duration 10
+# 10-second test segment first: seconds instead of minutes, and half resolution for speed
+telemetry-overlay export flight.MP4 flight.bin --offset 250 --start 100 --duration 10 \
+    --scale 0.5
 
-# then the whole clip, with an explicit encoder and quality
+# then the whole clip at full resolution, with an explicit encoder and quality
 telemetry-overlay export flight.MP4 flight.bin --offset 250 \
     --encoder x264 --quality 20 -o flight_hud.mp4 -y
 ```

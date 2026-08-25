@@ -119,6 +119,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     export.add_argument("--quality", type=int, help="CQ/CRF value; lower is better")
     export.add_argument(
+        "--scale",
+        type=float,
+        help="downscale factor for a fast draft export, e.g. 0.5 for half resolution",
+    )
+    export.add_argument(
         "--no-audio", action="store_true", help="drop the audio track instead of copying"
     )
     export.add_argument("-y", "--overwrite", action="store_true")
@@ -377,6 +382,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     options = ExportOptions(
         encoder=args.encoder,
         quality=args.quality,
+        scale=args.scale,
         start=args.start,
         duration=args.duration,
         copy_audio=not args.no_audio,
