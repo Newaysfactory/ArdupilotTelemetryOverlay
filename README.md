@@ -98,15 +98,12 @@ that is fine, just slower.
 ### Step 2 — get a rough log delay
 
 The log delay is the log time that corresponds to **video time zero**. Do not compute it
-from file timestamps: the camera clock is unreliable. Instead pick one event you can see
-in the video *and* find in the log, and subtract.
-
-The easiest event is the start of the takeoff roll. Say it happens 40 s into the video,
-and the log shows the AUTO takeoff at 215 s:
-
-```
-log_delay = 215 - 40 = 175
-```
+from file timestamps: the camera clock is unreliable. Instead pick one moment you can
+see in the video *and* find in the log — the start of the takeoff roll is the easiest —
+and give both timestamps with `--anchor-video-time`/`--anchor-log-time`; the tool does
+the subtraction for you. Say it happens 40 s into the video, and the log shows the AUTO
+takeoff at 215 s: `--anchor-video-time 40 --anchor-log-time 215` (log delay `175`,
+printed back so you can check it).
 
 If you cannot spot such an event, let `autosync` propose a starting point — it is a
 suggestion, never the answer. It never writes anything unless you pass `--write`, so
@@ -130,8 +127,9 @@ footage did not correlate, not that the number is nearly right.
 ### Step 3 — refine the log delay frame by frame
 
 Render single frames at a moment whose true state you know, and adjust the log delay until
-the overlay agrees with the picture. At this point there is nothing saved yet, so
-`--log-delay` is always explicit:
+the overlay agrees with the picture. From here on you are nudging a number, not
+re-reading two clocks, so switch to `--log-delay` directly — start from the value Step 2
+printed. At this point there is nothing saved yet, so `--log-delay` is always explicit:
 
 ```bash
 telemetry-overlay frame flight.MP4 flight.bin --at 40 --log-delay 175 -o out/f.png
@@ -187,11 +185,14 @@ telemetry-overlay frame "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
 ```
 
 That writes `flight.sync.json` (`data\ThumbPW_0024.sync.json` for the sample — next to
-the **video**, regardless of the log's name). From now on every command below can either
-omit `--log-delay` and let it read that file back, or keep passing `--log-delay` explicitly —
-useful if you never want to save anything and prefer to type the number every time (e.g.
-scripting, or comparing two candidate log delays side by side). This step is optional: if
-you skip it, repeat `--log-delay 171.8` on every command in steps 5-7 below.
+the **video**, regardless of the log's name). If you had used `--anchor-video-time`/
+`--anchor-log-time` instead, both timestamps would be saved alongside the computed log
+delay, so you can reopen the file later and see what event you synced against. From now
+on every command below can either omit `--log-delay` and let it read that file back, or
+keep passing `--log-delay` explicitly — useful if you never want to save anything and
+prefer to type the number every time (e.g. scripting, or comparing two candidate log
+delays side by side). This step is optional: if you skip it, repeat `--log-delay 171.8`
+on every command in steps 5-7 below.
 
 ### Step 5 — adjust the look
 
@@ -298,11 +299,16 @@ sit before the subcommand name: `--version` prints the package version, and
 
 - `-p`, `--preset PATH` — the layout/theme/units file to render with (default:
   `presets/default.json`). See [Presets](#presets).
-- `--log-delay SECONDS` — log time matching video time zero (`frame` and `export` only;
-  `autosync` computes it instead of taking it). Defaults to the value stored in the
-  video's `.sync.json`, or `0` if there is none.
+- `--log-delay SECONDS` — log time matching video time zero, given directly (`frame` and
+  `export` only; `autosync` computes it instead of taking it). Defaults to the value
+  stored in the video's `.sync.json`, or `0` if there is none.
+- `--anchor-video-time SECONDS` / `--anchor-log-time SECONDS` — an alternative to
+  `--log-delay`, given as a pair: the video and log timestamps of one moment you
+  recognise in both (e.g. takeoff). The log delay is computed from the two instead of
+  you subtracting them by hand. Give either `--log-delay` or this pair, not both.
 - `--save-sync` — write the log delay in effect (whether given on the command line or read
-  from an existing `.sync.json`) to `<video>.sync.json` (`frame` and `export` only).
+  from an existing `.sync.json`) to `<video>.sync.json` (`frame` and `export` only). If
+  it came from `--anchor-video-time`/`--anchor-log-time`, both timestamps are saved too.
 
 ### `probe` — see what you have
 
@@ -424,13 +430,18 @@ for that one slice so you can see whether the two traces actually line up.
 
 ```
 telemetry-overlay manualsync <video> <log> [-p PRESET]
-    --from SECONDS --to SECONDS --log-delay SECONDS [--plot DIR]
+    --from SECONDS --to SECONDS (--log-delay SECONDS | --anchor-video-time SECONDS --anchor-log-time SECONDS)
+    [--plot DIR]
 ```
 
 - `video`, `log` — required positionals.
 - `-p`, `--preset PATH` — accepted for consistency with the other commands but unused.
 - `--from` / `--to SECONDS` — the video slice to analyse, in video seconds.
 - `--log-delay SECONDS` — the log delay to check: `log_time = log_delay + video_time`.
+- `--anchor-video-time SECONDS` / `--anchor-log-time SECONDS` — an alternative to
+  `--log-delay`: the two timestamps of one moment recognisable in both video and log.
+  Give one form or the other; there is no `.sync.json` fallback here, unlike `frame` and
+  `export`.
 - `--plot DIR` — directory to save `manualsync_diagnostics.png` in (default: `out`).
 
 ```powershell
@@ -441,7 +452,8 @@ telemetry-overlay manualsync "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.b
 ### `export` — write the final video
 
 ```
-telemetry-overlay export <video> <log> [-p PRESET] [--log-delay SECONDS] [--save-sync]
+telemetry-overlay export <video> <log> [-p PRESET]
+    [--log-delay SECONDS | --anchor-video-time SECONDS --anchor-log-time SECONDS] [--save-sync]
     [-o PATH] [--from SECONDS] [--to SECONDS]
     [--encoder KEY] [--quality N] [--scale FACTOR] [--no-audio] [-y]
 ```
@@ -498,12 +510,19 @@ video time zero against an earlier log time, so the overlay shows something that
 happened earlier (it *lags* the picture). To fix a mismatch: overlay ahead of the
 picture → lower the log delay; overlay lagging the picture → raise it.
 
-Find it by rendering frames around a recognisable event (the moment of rotation on
-takeoff, a sharp roll, touchdown) and adjusting until the overlay matches the picture.
-`probe` prints the range of log delays for which the clip fits inside the log.
+The easiest way to find it: read off the timestamp of a recognisable event (the moment
+of rotation on takeoff, a sharp roll, touchdown) both from the video and from the log,
+and give the pair to `--anchor-video-time`/`--anchor-log-time` — the log delay is
+computed for you, no mental subtraction required. `probe` prints the range of log delays
+for which the clip fits inside the log, useful as a sanity check on the result. From
+there, refine by rendering frames and nudging the log delay directly with `--log-delay`
+until the overlay matches the picture exactly (see [Step 3](#step-3--refine-the-log-delay-frame-by-frame)
+of the tutorial).
 
-Store it next to the video with `--save-sync`, which writes `flight.sync.json`; later
-commands pick it up automatically when `--log-delay` is omitted.
+Store it next to the video with `--save-sync`, which writes `flight.sync.json` (with the
+anchor pair alongside the log delay, if that is what you used, so the file stays
+readable and re-editable); later commands pick it up automatically when `--log-delay`
+and `--anchor-*` are both omitted.
 
 The log delay lives apart from the preset on purpose: a preset describes a *look* and is
 reused across flights, while a log delay belongs to one video/log pair.

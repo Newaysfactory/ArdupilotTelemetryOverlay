@@ -101,13 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
     manualsync.add_argument(
         "--to", dest="end", type=float, required=True, help="video end time, s"
     )
-    manualsync.add_argument(
-        "--log-delay",
-        dest="log_delay",
-        type=float,
-        required=True,
-        help="log_time = log_delay + video_time",
-    )
+    _add_sync_args(manualsync)
     manualsync.add_argument(
         "--plot",
         type=Path,
@@ -156,18 +150,43 @@ def _add_common(parser: argparse.ArgumentParser, *, with_log_delay: bool = True)
         help=f"overlay preset (default: {DEFAULT_PRESET.name})",
     )
     if with_log_delay:
-        parser.add_argument(
-            "--log-delay",
-            dest="log_delay",
-            type=float,
-            help="log time matching video time zero, in seconds; "
-            "defaults to the video's .sync.json, else 0",
-        )
+        _add_sync_args(parser)
         parser.add_argument(
             "--save-sync",
             action="store_true",
             help="store the log delay in the video's .sync.json",
         )
+
+
+def _add_sync_args(parser: argparse.ArgumentParser) -> None:
+    """``--log-delay`` and the ``--anchor-*`` pair: two ways to say the same thing.
+
+    Give ``--log-delay`` directly if you already know it (e.g. from ``autosync``'s
+    suggestion, or a previous run). Otherwise give ``--anchor-video-time`` and
+    ``--anchor-log-time``: the video and log timestamps of one moment you recognise in
+    both (e.g. takeoff) — the log delay is computed from that pair instead of you doing
+    the subtraction by hand.
+    """
+    parser.add_argument(
+        "--log-delay",
+        dest="log_delay",
+        type=float,
+        help="log time matching video time zero, in seconds (advanced; prefer "
+        "--anchor-video-time/--anchor-log-time)",
+    )
+    parser.add_argument(
+        "--anchor-video-time",
+        dest="anchor_video_time",
+        type=float,
+        help="video time, in seconds, of a moment you can also find in the log "
+        "(e.g. takeoff); pair with --anchor-log-time",
+    )
+    parser.add_argument(
+        "--anchor-log-time",
+        dest="anchor_log_time",
+        type=float,
+        help="log time, in seconds, of the same moment given in --anchor-video-time",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -362,6 +381,11 @@ def cmd_manualsync(args: argparse.Namespace) -> int:
 
     info = probe_video(args.video)
     log = read_log(args.log, progress=_note)
+    sync = _sync_from_cli(args)
+    if sync is None:
+        raise ValueError(
+            "give either --log-delay or both --anchor-video-time and --anchor-log-time"
+        )
     print(f"analysing video {args.start:.1f}s -> {args.end:.1f}s (optical flow)...")
     diagnostics = compute_manual_diagnostics(
         args.video,
@@ -372,10 +396,10 @@ def cmd_manualsync(args: argparse.Namespace) -> int:
         progress=lambda f: _progress_bar("  tracking", f),
     )
     print()
-    xlim = (args.log_delay + args.start, args.log_delay + args.end)
+    xlim = (sync.log_delay + args.start, sync.log_delay + args.end)
     path = save_diagnostic_plots(
         diagnostics,
-        args.log_delay,
+        sync.log_delay,
         args.plot,
         filename="manualsync_diagnostics.png",
         xlim=xlim,
@@ -404,7 +428,7 @@ def cmd_export(args: argparse.Namespace) -> int:
         overwrite=args.overwrite,
     )
     print(f"{args.video.name} + {args.log.name} -> {output}")
-    print(f"  log delay {sync.log_delay:+.3f}s   preset {Path(args.preset).name}")
+    print(f"  {_describe_sync(sync)}   preset {Path(args.preset).name}")
 
     result = export_video(
         args.video,
@@ -452,15 +476,40 @@ def _timeline(info, log, preset, sync):
     )
 
 
+def _sync_from_cli(args: argparse.Namespace) -> SyncModel | None:
+    """Build a sync from ``--log-delay`` or the ``--anchor-*`` pair, or ``None`` if
+    neither was given (the caller then falls back to the companion ``.sync.json``, or
+    raises if there is no such fallback)."""
+    anchor_video_time = getattr(args, "anchor_video_time", None)
+    anchor_log_time = getattr(args, "anchor_log_time", None)
+    log_delay = getattr(args, "log_delay", None)
+    if (anchor_video_time is None) != (anchor_log_time is None):
+        raise ValueError(
+            "--anchor-video-time and --anchor-log-time must be given together"
+        )
+    if anchor_video_time is not None:
+        if log_delay is not None:
+            raise ValueError(
+                "use either --log-delay or --anchor-video-time/--anchor-log-time, not both"
+            )
+        sync = SyncModel.from_anchors(
+            anchor_video_time, anchor_log_time, note="command line anchors"
+        )
+        _note(f"{_describe_sync(sync)} (from the anchors given on the command line)")
+        return sync
+    if log_delay is not None:
+        return SyncModel(log_delay=log_delay, note="command line")
+    return None
+
+
 def _resolve_sync(args: argparse.Namespace, video: Path) -> SyncModel:
-    """Command line log delay wins, then the companion sync file, then zero."""
-    if getattr(args, "log_delay", None) is not None:
-        sync = SyncModel(log_delay=args.log_delay, note="command line")
-    else:
+    """Command line sync wins, then the companion sync file, then zero."""
+    sync = _sync_from_cli(args)
+    if sync is None:
         existing = SyncModel.load_for(video)
         if existing is not None:
             sync = existing
-            _note(f"using log delay {sync.log_delay:+.3f}s from {existing.source}")
+            _note(f"{_describe_sync(sync)} (from {existing.source})")
         else:
             sync = SyncModel()
             _note("no log delay given and no .sync.json found: using 0")
@@ -468,6 +517,15 @@ def _resolve_sync(args: argparse.Namespace, video: Path) -> SyncModel:
         path = sync.save(SyncModel.path_for(video))
         _note(f"saved log delay to {path}")
     return sync
+
+
+def _describe_sync(sync: SyncModel) -> str:
+    if sync.anchor_video_time is not None:
+        return (
+            f"log delay {sync.log_delay:+.3f}s  (anchor: video "
+            f"{sync.anchor_video_time:.3f}s = log {sync.anchor_log_time:.3f}s)"
+        )
+    return f"log delay {sync.log_delay:+.3f}s"
 
 
 def _fmt(value: float | None) -> str:
