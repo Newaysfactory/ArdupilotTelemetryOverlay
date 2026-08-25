@@ -447,7 +447,7 @@ telemetry-overlay export <video> <log> [-p PRESET] [--log-delay SECONDS] [--save
 ```
 
 - `video`, `log` — required positionals.
-- `-o`, `--output PATH` — where to write the file (default: `<video>.overlay.mp4`).
+- `-o`, `--output PATH` — where to write the file (default: `out/<video stem>.overlay.mp4`).
 - `--from SECONDS` — trim start, in video seconds (default: from the beginning).
 - `--to SECONDS` — trim end, in video seconds (default: to the end of the video).
 - `--encoder KEY` — one of `nvenc_h264`, `nvenc_hevc`, `x264`, `x265`; see `probe` for
