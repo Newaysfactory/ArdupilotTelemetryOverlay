@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, QSizeF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+import math
+
+from PySide6.QtCore import QPointF, QRectF, QSize, QSizeF, Qt
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QRadialGradient
 
 from ...telemetry import fields
 from ...telemetry.timeline import FrameState
@@ -63,6 +65,26 @@ class HorizonElement(HudElement):
     def _line_width(self) -> float:
         return max(1.0, self.ctx.px(self.theme.horizon_line_width) * self.config.scale)
 
+    def bounds(self) -> QRectF:
+        """Widen the compositing region to include the roll arc.
+
+        Its ticks sit at ``rect.height() * 0.52`` from the centre -- already past the
+        box's own top edge -- plus tick length and outline bleed. Left to the base
+        class's box-sized bounds, that part is drawn but then cropped out of the band
+        handed to the exporter, so it never reaches the final frame.
+        """
+        base = super().bounds()
+        if not self.show_roll_arc:
+            return base
+        rect = self.rect()
+        radius = rect.height() * 0.52 * 1.15
+        center = rect.center()
+        arc_box = QRectF(
+            center.x() - radius, center.y() - radius, radius * 2.0, radius * 2.0
+        )
+        frame = QRectF(0, 0, self.ctx.width, self.ctx.height)
+        return base.united(arc_box).intersected(frame)
+
     # ---- drawing ----------------------------------------------------------
 
     def cache_key(self, state: FrameState) -> tuple:
@@ -96,23 +118,85 @@ class HorizonElement(HudElement):
         roll += self.roll_offset
         pitch += self.pitch_offset
 
-        painter.save()
-        painter.setClipRect(rect)
-        painter.translate(rect.center())
-        painter.rotate(-roll)
-        ppd = self._pixels_per_degree(rect)
-        # Nose up moves the horizon down the screen.
-        painter.translate(0.0, pitch * ppd)
-
-        self._draw_sky_ground(painter, rect)
-        self._draw_horizon_line(painter, rect, outline)
-        self._draw_ladder(painter, rect, ppd, outline)
-        painter.restore()
+        self._draw_ladder_window(painter, rect, roll, pitch, outline)
 
         if self.show_roll_arc:
             self._draw_roll_arc(painter, rect, roll)
         if self.show_reference:
             self._draw_reference(painter, rect, failed=False)
+
+    def _draw_ladder_window(
+        self,
+        painter: QPainter,
+        rect: QRectF,
+        roll: float,
+        pitch: float,
+        outline: QColor,
+    ) -> None:
+        """Sky/ground/ladder, masked to an ellipse that fades at its own edge.
+
+        A rotated ladder clipped to the element's plain rectangle leaves a visible
+        straight edge wherever a rung exits the box -- at a steep bank the box itself
+        becomes visible, which reads as the HUD being "cut off" rather than as a
+        deliberate instrument window. Rendering into an offscreen image and multiplying
+        it by a radial (elliptical) alpha gradient removes that hard edge: content
+        fades out before it would otherwise be sliced by a straight boundary.
+        """
+        size = QSize(math.ceil(rect.width()), math.ceil(rect.height()))
+        if size.width() <= 0 or size.height() <= 0:
+            return
+        local_rect = QRectF(0.0, 0.0, size.width(), size.height())
+
+        image = QImage(size, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(Qt.GlobalColor.transparent)
+        local = QPainter(image)
+        try:
+            local.setRenderHints(painter.renderHints())
+            local.translate(local_rect.center())
+            local.rotate(-roll)
+            ppd = self._pixels_per_degree(local_rect)
+            # Nose up moves the horizon down the screen.
+            local.translate(0.0, pitch * ppd)
+            self._draw_sky_ground(local, local_rect)
+            self._draw_horizon_line(local, local_rect, outline)
+            self._draw_ladder(local, local_rect, ppd, outline)
+        finally:
+            local.end()
+
+        self._apply_edge_fade(image, local_rect)
+        painter.drawImage(rect.topLeft(), image)
+
+    def _apply_edge_fade(self, image: QImage, local_rect: QRectF) -> None:
+        """Multiply ``image``'s alpha by a radial gradient inscribed in its box.
+
+        Both the elliptical cutoff and the soft fade come from this one gradient:
+        solid out to ``fade_start`` of the radius, transparent from the radius
+        outward (``QRadialGradient`` pads the last stop past its radius).
+        ``mask_radius`` scales the circle itself relative to the box (1.0 touches
+        the box's mid-edges exactly; >1.0 lets the circle reach further, e.g. closer
+        to the corners).
+        """
+        mask_radius = 1.15
+        fade_start = 0.85
+        painter = QPainter(image)
+        try:
+            painter.setCompositionMode(
+                QPainter.CompositionMode.CompositionMode_DestinationIn
+            )
+            painter.translate(local_rect.center())
+            painter.scale(
+                local_rect.width() * 0.5 * mask_radius,
+                local_rect.height() * 0.5 * mask_radius,
+            )
+            gradient = QRadialGradient(QPointF(0.0, 0.0), 1.0)
+            gradient.setColorAt(0.0, QColor(255, 255, 255, 255))
+            gradient.setColorAt(fade_start, QColor(255, 255, 255, 255))
+            gradient.setColorAt(1.0, QColor(255, 255, 255, 0))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(gradient)
+            painter.drawRect(QRectF(-1.0, -1.0, 2.0, 2.0))
+        finally:
+            painter.end()
 
     def _draw_sky_ground(self, painter: QPainter, rect: QRectF) -> None:
         sky = parse_color(self.theme.horizon_sky_color)
