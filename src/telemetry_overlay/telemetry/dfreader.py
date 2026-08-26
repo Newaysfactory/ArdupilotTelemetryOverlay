@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 
 #: Cache format version. The channel definitions are fingerprinted separately (see
 #: ``_extraction_signature``) so editing fields.py invalidates caches automatically.
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 CACHE_SUFFIX = ".overlay-cache.npz"
 
 #: Status texts emitted while booting, before the vehicle can fly. They are dropped by
@@ -177,8 +177,17 @@ def _parse(path: Path) -> TelemetryLog:
             collector.v.append(value)
             collector.valid.append(is_valid)
 
-    if arm_time is None:
-        arm_time = _arm_time_from_messages(messages)
+    # The EV_ARMED event and the "Throttle armed" status text are two independent
+    # records of the same fact, and on some logs one of them is missing for the
+    # *first* arming of the flight (seen on montagna.bin: the initial arm at 87s has
+    # no EV_ARMED record, only the text message; a later disarm/rearm cycle at 409s
+    # does have one). Relying on EV alone then reports the second arming as if it
+    # were the first, which throws off the flight timer origin and drops every
+    # message logged between the true arm and the spurious one. Take the earliest of
+    # the two candidates instead of preferring EV unconditionally.
+    text_arm_time = _arm_time_from_messages(messages)
+    if text_arm_time is not None and (arm_time is None or text_arm_time < arm_time):
+        arm_time = text_arm_time
 
     channels: dict[str, Channel] = {}
     missing: list[str] = []
