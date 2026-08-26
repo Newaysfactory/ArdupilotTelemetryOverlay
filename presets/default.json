@@ -135,6 +135,14 @@
       }
     },
     {
+      "type": "wind",
+      "id": "wind",
+      "x": 0.03,
+      "y": 0.62,
+      "anchor": "center-left",
+      "unit": "km/h"
+    },
+    {
       "type": "readout",
       "id": "alt",
       "x": 0.97,

@@ -31,6 +31,8 @@ THROTTLE = "throttle"
 ROLL = "roll"
 PITCH = "pitch"
 YAW = "yaw"
+WIND_SPEED = "wind_speed"
+WIND_DIR = "wind_dir"
 
 
 @dataclass(frozen=True)
@@ -185,6 +187,31 @@ CHANNELS: tuple[ChannelSpec, ...] = (
         (
             Source("ATT.Yaw", "ATT", lambda m: m.Yaw),
             Source("AHR2.Yaw", "AHR2", lambda m: m.Yaw),
+        ),
+    ),
+    ChannelSpec(
+        WIND_SPEED,
+        SPEED,
+        "WIND",
+        # EKF3's own wind estimate (NE velocity of the air mass, m/s). No fallback:
+        # a log without EKF3 wind estimation has no other source for this.
+        (Source("XKF2.VWN/VWE", "XKF2", lambda m: math.hypot(m.VWN, m.VWE), None, "C"),),
+    ),
+    ChannelSpec(
+        WIND_DIR,
+        ANGLE,
+        "WIND DIR",
+        # Bearing the wind blows *toward* (the heading of the (VWN, VWE) vector
+        # itself), matching a G1000-style wind vector rather than the METAR "wind
+        # from" convention -- see WindReadout for how the HUD arrow uses this.
+        (
+            Source(
+                "XKF2.VWN/VWE",
+                "XKF2",
+                lambda m: math.degrees(math.atan2(m.VWE, m.VWN)) % 360.0,
+                None,
+                "C",
+            ),
         ),
     ),
 )

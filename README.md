@@ -2,8 +2,8 @@
 
 Burns telemetry from an ArduPlane DataFlash log (`.bin`) onto flight video as an
 FPV-style HUD/OSD: airspeed, ground speed, altitude, height above ground, vertical
-speed, battery voltage/current/consumption, throttle, autopilot status messages and an
-artificial horizon.
+speed, battery voltage/current/consumption, throttle, wind direction and speed,
+autopilot status messages and an artificial horizon.
 
 Phase 1 (this version) is the command-line core. The interactive GUI for time
 synchronisation and drag-and-drop layout editing is phase 2; the rendering engine,
@@ -579,8 +579,8 @@ normalised to the frame (0..1) and all sizes are fractions of frame height, so a
 made against a 1080p proxy renders identically on a 4K master.
 
 Element types: `readout` (any telemetry channel), `heading`, `mode`, `timer`, `horizon`,
-`messages`. Each entry takes `x`, `y`, `anchor`, `visible`, `scale`, `unit`, `decimals`
-and a type-specific `options` block — see the docstrings in
+`wind`, `messages`. Each entry takes `x`, `y`, `anchor`, `visible`, `scale`, `unit`,
+`decimals` and a type-specific `options` block — see the docstrings in
 `src/telemetry_overlay/hud/elements/`.
 
 Units are per element: `km/h`, `kt`, `mph`, `m/s` for speeds, `m`/`ft` for heights,
@@ -611,6 +611,7 @@ Verified against ArduPlane 4.7. `probe` shows which source each channel actually
 | Consumed | `BAT.CurrTot` (already mAh, cumulative) | — |
 | Throttle | `CTUN.ThO` (already 0..100 %) | — |
 | Attitude | `ATT.Roll/Pitch/Yaw` | `AHR2` |
+| Wind speed/direction | `XKF2.VWN/VWE` — EKF3 wind estimate | none, by design |
 | Mode, messages | `MODE`, `MSG` | — |
 
 **AGL shows `NO AGL` most of the time, and that is correct.** A rangefinder is a
@@ -618,6 +619,12 @@ short-range sensor — around 12 m on the test aircraft — so it only reads nea
 ground, during takeoff, landing and low passes. There is deliberately no fallback to
 barometric or terrain height: AGL here means a measured height. A hysteresis filter
 (default 0.3 s) keeps the readout from strobing at the edge of the sensor's range.
+
+**The wind arrow is nose-relative, not north-up.** It points where the wind is
+blowing *toward*, relative to the aircraft's heading (straight up = dead ahead) — the
+same convention as a G1000's wind vector, and the only one readable on a frame that is
+always nose-forward rather than compass-oriented. There is no fallback for wind: a log
+without an EKF3 wind estimate shows "no data" rather than guessing.
 
 Status messages are guaranteed at least one second on screen each. When several arrive
 in the same millisecond they queue rather than flash by. The boot banner and everything

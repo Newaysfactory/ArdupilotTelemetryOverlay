@@ -10,6 +10,7 @@ from .readout import (
     TimerReadout,
 )
 from .registry import build_element, element_types, register
+from .wind import WindReadout
 
 __all__ = [
     "ChannelReadout",
@@ -20,6 +21,7 @@ __all__ = [
     "ModeReadout",
     "RenderContext",
     "TimerReadout",
+    "WindReadout",
     "build_element",
     "element_types",
     "register",
