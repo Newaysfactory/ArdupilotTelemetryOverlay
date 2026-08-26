@@ -3,7 +3,8 @@ pymavlink>=2.4.42      # Official ArduPilot DataFlash (.bin) log parser
 PySide6>=6.6           # Qt6 bindings: QPainter rendering engine (shared by CLI and GUI)
 numpy>=1.26            # Vectorised telemetry resampling
 av>=12.0               # PyAV: frame-accurate video decoding for the preview/scrubbing
-opencv-python>=4.9     # Optional: optical-flow based automatic sync only
+opencv-python>=4.9     # Optical flow for the autosync/manualsync commands
+matplotlib>=3.8        # Diagnostic plots for autosync --plot and manualsync
 
 # Development
 pytest>=8.0
