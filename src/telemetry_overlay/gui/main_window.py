@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 from ..cli import DEFAULT_PRESET, cmd_probe
 from ..telemetry import read_log
 from .controller import ProjectController
+from .preview_tab import PreviewTab
 from .terminal import TerminalWidget
 from .workers import CommandWorker
 
@@ -93,6 +94,8 @@ class MainWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Vertical)
 
         self.tabs = QTabWidget()
+        self.preview_tab = PreviewTab(self.controller)
+        self.tabs.addTab(self.preview_tab, "Preview")
         splitter.addWidget(self.tabs)
         splitter.addWidget(self.terminal)
         splitter.setStretchFactor(0, 4)
@@ -103,6 +106,10 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(splitter)
         self.setCentralWidget(wrapper)
+
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
+        self.preview_tab.shutdown()
+        super().closeEvent(event)
 
     # ---- drag&drop -------------------------------------------------------
 

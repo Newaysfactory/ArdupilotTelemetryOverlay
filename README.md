@@ -460,10 +460,15 @@ PYTHONPATH=src .venv/bin/python -m telemetry_overlay.gui.app data/flight.MP4 dat
 
 Currently implemented: drag&drop (or **Browse...**) loading of the video, the `.bin`
 log and the preset; a **Probe** button that runs `probe` and prints its report to the
-terminal pane at the bottom of the window, shared by every command the GUI runs. More
-tabs (preview, autosync, manualsync, export) are landing incrementally; each reuses the
-terminal pane for its textual output the same way, so nothing here duplicates what the
-CLI already prints.
+terminal pane at the bottom of the window, shared by every command the GUI runs; and a
+**Preview** tab with a scrub slider, an exact-time field and a **Quality** selector
+(Full / 1/2 / 1/4) showing the overlay composited on the actual video frame, exactly
+like `frame` but live and interactive. Scrubbing decodes on a background thread and is
+debounced (~60 ms), since a distant seek can take a moment and must not freeze the
+window; the quality selector trims the compositing and on-screen scaling cost, not the
+decode itself. More tabs (autosync, manualsync, export) are landing incrementally; each
+reuses the terminal pane for its textual output the same way, so nothing here
+duplicates what the CLI already prints.
 
 ## Tests
 

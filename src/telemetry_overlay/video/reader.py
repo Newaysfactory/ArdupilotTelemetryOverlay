@@ -27,7 +27,15 @@ class FrameReader:
         self.info = info or probe_video(self.path)
         self._container = av.open(str(self.path))
         self._stream = self._container.streams.video[0]
-        self._stream.thread_type = "AUTO"
+        # Not "AUTO": FFmpeg's own multi-threaded decoder, combined with the
+        # repeated container.seek() this class does for random access, stalls for
+        # several *seconds* per seek when running on a background thread alongside
+        # an active Qt event loop (reproduced consistently on Windows; a purely
+        # sequential decode loop with AUTO threading, as export.py uses, is
+        # unaffected -- the pathology needs both threaded decode and repeated
+        # seeking). Single-frame decode timing with NONE is equal or better anyway,
+        # since thread pool spin-up overhead was never worth it for one frame.
+        self._stream.thread_type = "NONE"
         self._iterator = None
         self._next_index: int | None = None
 
