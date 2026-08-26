@@ -5,9 +5,11 @@ FPV-style HUD/OSD: airspeed, ground speed, altitude, height above ground, vertic
 speed, battery voltage/current/consumption, throttle, wind direction and speed,
 autopilot status messages and an artificial horizon.
 
-Phase 1 (this version) is the command-line core. The interactive GUI for time
-synchronisation and drag-and-drop layout editing is phase 2; the rendering engine,
-preset format and export pipeline are already shared with it.
+Phase 1 is the command-line core, documented below. Phase 2 is a PySide6 GUI (see
+[GUI](#gui)): a control panel over the same CLI commands, with drag&drop loading, an
+overlay preview, and an interactive plot for manual sync -- it calls the exact same
+`cmd_probe`/`cmd_autosync`/`export_video` code the CLI uses, so nothing here is
+reimplemented for the GUI.
 
 ## Setup
 
@@ -439,6 +441,30 @@ If you want the original file left untouched, the alternative is to composite in
 editor. Exporting the HUD alone to a file with an alpha channel is not implemented yet;
 `frame --overlay-only` produces single transparent PNGs today.
 
+## GUI
+
+A PySide6 control panel over the CLI commands above, for anyone who would rather drag
+files in and click a button than type flags. It is a thin layer: every action calls the
+same `cmd_probe`/`cmd_autosync`/`export_video`/... code the CLI uses, so its output and
+behaviour match the CLI exactly.
+
+```powershell
+.venv\Scripts\telemetry-overlay-gui.exe                                    # empty, drag files in
+.venv\Scripts\telemetry-overlay-gui.exe "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin"
+```
+
+```bash
+# without installing
+PYTHONPATH=src .venv/bin/python -m telemetry_overlay.gui.app data/flight.MP4 data/flight.bin
+```
+
+Currently implemented: drag&drop (or **Browse...**) loading of the video, the `.bin`
+log and the preset; a **Probe** button that runs `probe` and prints its report to the
+terminal pane at the bottom of the window, shared by every command the GUI runs. More
+tabs (preview, autosync, manualsync, export) are landing incrementally; each reuses the
+terminal pane for its textual output the same way, so nothing here duplicates what the
+CLI already prints.
+
 ## Tests
 
 ```bash
@@ -447,5 +473,6 @@ editor. Exporting the HUD alone to a file with an alpha channel is not implement
 
 The suite covers interpolation at the edges of the log window, gap handling, the
 rangefinder validity hysteresis, the message queue (using timings taken from a real
-log), unit conversions, preset round-trips, band geometry, and the sync
-cross-correlation against signals with a known log delay.
+log), unit conversions, preset round-trips, band geometry, the sync cross-correlation
+against signals with a known log delay, and the GUI terminal pane's carriage-return
+handling (`tests/test_gui.py`).
