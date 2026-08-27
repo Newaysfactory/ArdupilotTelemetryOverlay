@@ -12,7 +12,6 @@ from __future__ import annotations
 import gc
 import logging
 from dataclasses import dataclass, field
-from functools import lru_cache
 
 import av
 import numpy as np
@@ -112,9 +111,28 @@ _PROBE_OPTIONS: dict[str, dict[str, str]] = {
 }
 
 
-@lru_cache(maxsize=None)
+#: Codecs confirmed usable, cached forever -- but only successes. A hardware encoder
+#: that fails a probe (NVENC session limit hit by another app, GPU briefly busy) is not
+#: unusable *forever*, so a negative result must not stick: in the GUI, which is one
+#: long-running process, caching a transient failure with an unconditional
+#: ``lru_cache`` silently downgraded every export for the rest of the session to a
+#: software encoder (~3x slower, measured) even after the contention that caused the
+#: original failure was long gone. A CLI run never showed this because it is a fresh
+#: process every time, so it always re-probed cleanly.
+_available_codecs: set[str] = set()
+
+
 def is_available(codec: str) -> bool:
     """Whether ``codec`` can actually encode a frame on this machine."""
+    if codec in _available_codecs:
+        return True
+    if _probe(codec):
+        _available_codecs.add(codec)
+        return True
+    return False
+
+
+def _probe(codec: str) -> bool:
     if codec not in av.codecs_available:
         return False
     # x265 and friends print a multi-line banner on open; a capability probe must stay
