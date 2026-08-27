@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
-    QSlider,
     QVBoxLayout,
     QWidget,
 )
@@ -21,9 +20,9 @@ from ..telemetry.timeline import build_timeline
 from ..video.export import _display_size, _scaled_size  # shared on purpose
 from .controller import ProjectController
 from .frame_decode_worker import FrameDecodeWorker
+from .range_slider import RangeSlider
+from .widgets import field_label
 
-#: Slider resolution: one step per this many milliseconds of video time.
-_SLIDER_STEP_MS = 10
 #: How long to wait, after the last slider movement, before decoding.
 _DEBOUNCE_MS = 60
 #: Preview quality choices: label -> downscale factor applied before compositing.
@@ -81,18 +80,23 @@ class PreviewTab(QWidget):
         self._current_preset: Preset | None = None
         self._duration = 0.0
         self._updating_controls = False
+        #: Guards against feeding a range change straight back into the slider
+        #: that just produced it -- same pattern as manualsync_tab's log-delay drag.
+        self._suppress_range_feedback = False
 
         self.image_label = _ImageLabel()
 
-        self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.setMinimum(0)
-        self.slider.valueChanged.connect(self._on_slider_changed)
-        self.slider.sliderReleased.connect(self._request_frame_now)
+        self.slider = RangeSlider()
+        self.slider.positionChanged.connect(self._on_slider_position_changed)
+        self.slider.positionCommitted.connect(self._request_frame_now)
+        self.slider.rangeChanged.connect(self._on_slider_range_dragged)
 
         self.time_spin = QDoubleSpinBox()
         self.time_spin.setDecimals(2)
         self.time_spin.setSuffix(" s")
         self.time_spin.valueChanged.connect(self._on_spin_changed)
+
+        self.range_label = QLabel("From 0.00s  To 0.00s")
 
         self.quality_combo = QComboBox()
         for label, _scale in _QUALITY_LEVELS:
@@ -110,6 +114,18 @@ class PreviewTab(QWidget):
         self._debounce.setInterval(_DEBOUNCE_MS)
         self._debounce.timeout.connect(self._request_frame_now)
 
+        slider_header = QHBoxLayout()
+        slider_header.addWidget(
+            field_label(
+                "Timeline",
+                "The needle scrubs the preview frame; the two round handles set the "
+                "From/To range shared with the Autosync/Manualsync/Export tabs. Click "
+                "empty groove to jump the needle there; drag any handle to move it.",
+            )
+        )
+        slider_header.addWidget(self.range_label)
+        slider_header.addStretch(1)
+
         controls = QHBoxLayout()
         controls.addWidget(self.slider, 1)
         controls.addWidget(self.time_spin)
@@ -119,6 +135,7 @@ class PreviewTab(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(self.status_label)
         layout.addWidget(self.image_label, 1)
+        layout.addLayout(slider_header)
         layout.addLayout(controls)
 
         self.setEnabled(False)
@@ -169,9 +186,13 @@ class PreviewTab(QWidget):
         self.status_label.setText(f"{c.video.name}  +  {c.log.name if c.log else '(no log)'}")
 
         self._updating_controls = True
-        self.slider.setMaximum(max(1, int(self._duration * 1000 / _SLIDER_STEP_MS)))
+        self.slider.setRange(0.0, self._duration)
         self.time_spin.setRange(0.0, self._duration)
         self._updating_controls = False
+
+        if not self._suppress_range_feedback:
+            self.slider.setLowHigh(c.range_start, c.range_end)
+            self._update_range_label()
 
         self.setEnabled(True)
         self._request_frame_now()
@@ -195,13 +216,13 @@ class PreviewTab(QWidget):
     # ---- slider/spin box <-> video time -----------------------------------
 
     def _video_time(self) -> float:
-        return self.slider.value() * _SLIDER_STEP_MS / 1000.0
+        return self.slider.position()
 
-    def _on_slider_changed(self, value: int) -> None:
+    def _on_slider_position_changed(self, value: float) -> None:
         if self._updating_controls:
             return
         self._updating_controls = True
-        self.time_spin.setValue(value * _SLIDER_STEP_MS / 1000.0)
+        self.time_spin.setValue(value)
         self._updating_controls = False
         self._debounce.start()
 
@@ -209,9 +230,20 @@ class PreviewTab(QWidget):
         if self._updating_controls:
             return
         self._updating_controls = True
-        self.slider.setValue(int(round(value * 1000 / _SLIDER_STEP_MS)))
+        self.slider.setPosition(value)
         self._updating_controls = False
         self._debounce.start()
+
+    def _on_slider_range_dragged(self, low: float, high: float) -> None:
+        self._update_range_label(low, high)
+        self._suppress_range_feedback = True
+        self.controller.set_range(low, high)
+        self._suppress_range_feedback = False
+
+    def _update_range_label(self, low: float | None = None, high: float | None = None) -> None:
+        low = self.controller.range_start if low is None else low
+        high = self.controller.range_end if high is None else high
+        self.range_label.setText(f"From {low:.2f}s  To {high:.2f}s")
 
     # ---- decoding ----------------------------------------------------------
 

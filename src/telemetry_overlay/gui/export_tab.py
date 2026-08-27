@@ -45,6 +45,9 @@ class ExportTab(QWidget):
         self.controller = controller
         self.terminal = terminal
         self._worker: CommandWorker | None = None
+        #: Guards against feeding a range change straight back into the field that
+        #: just produced it -- same pattern as manualsync_tab's log-delay drag.
+        self._suppress_range_feedback = False
 
         self.output_field = QLineEdit()
         output_browse = QPushButton("Browse...")
@@ -56,12 +59,12 @@ class ExportTab(QWidget):
         self.start_spin = QDoubleSpinBox()
         self.start_spin.setRange(0.0, 1e6)
         self.start_spin.setSuffix(" s")
+        self.start_spin.valueChanged.connect(self._on_range_edited)
 
         self.end_spin = QDoubleSpinBox()
         self.end_spin.setRange(0.0, 1e6)
         self.end_spin.setSuffix(" s")
-        self.end_spin.setSpecialValueText("end of video")
-        self.end_spin.setValue(0.0)
+        self.end_spin.valueChanged.connect(self._on_range_edited)
 
         self.encoder_combo = QComboBox()
         self.encoder_combo.addItem("Automatic (best available)", None)
@@ -101,14 +104,18 @@ class ExportTab(QWidget):
             output_row,
         )
         form.addRow(
-            field_label("From", "Video time (seconds) where the export starts."),
+            field_label(
+                "From",
+                "Video time (seconds) where the export starts. Shared with the "
+                "Preview tab's slider and every other tab's From/To.",
+            ),
             self.start_spin,
         )
         form.addRow(
             field_label(
                 "To",
-                "Video time (seconds) where the export ends. Leave at 'end of video' "
-                "to export the whole rest of the clip.",
+                "Video time (seconds) where the export ends. Shared with the "
+                "Preview tab's slider and every other tab's From/To.",
             ),
             self.end_spin,
         )
@@ -166,9 +173,21 @@ class ExportTab(QWidget):
         if ready and c.info is not None:
             if not self.output_field.text():
                 self.output_field.setText(str(Path("out") / (c.video.stem + ".overlay.mp4")))
-            if self.end_spin.value() == 0.0:
-                self.end_spin.setValue(c.info.duration)
+            self.start_spin.setRange(0.0, c.info.duration)
+            self.end_spin.setRange(0.0, c.info.duration)
             self._refresh_encoders()
+        if not self._suppress_range_feedback:
+            self.start_spin.blockSignals(True)
+            self.start_spin.setValue(c.range_start)
+            self.start_spin.blockSignals(False)
+            self.end_spin.blockSignals(True)
+            self.end_spin.setValue(c.range_end)
+            self.end_spin.blockSignals(False)
+
+    def _on_range_edited(self, _value: float) -> None:
+        self._suppress_range_feedback = True
+        self.controller.set_range(self.start_spin.value(), self.end_spin.value())
+        self._suppress_range_feedback = False
 
     def _refresh_encoders(self) -> None:
         if self.encoder_combo.count() > 1:
@@ -203,8 +222,8 @@ class ExportTab(QWidget):
             encoder=self.encoder_combo.currentData(),
             quality=int(self.quality_spin.value()) or None,
             scale=self.scale_spin.value(),
-            start=self.start_spin.value() or None,
-            end=self.end_spin.value() or None,
+            start=self.start_spin.value(),
+            end=self.end_spin.value(),
             copy_audio=self.audio_check.isChecked(),
             overwrite=self.overwrite_check.isChecked(),
         )

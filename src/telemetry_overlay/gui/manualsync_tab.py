@@ -53,14 +53,17 @@ class ManualsyncTab(QWidget):
         self._worker: CommandWorker | None = None
         self._diagnostics = None
         self._suppress_sync_feedback = False
+        self._suppress_range_feedback = False
 
         self.start_spin = QDoubleSpinBox()
         self.start_spin.setRange(0.0, 1e6)
         self.start_spin.setSuffix(" s")
+        self.start_spin.valueChanged.connect(self._on_range_edited)
 
         self.end_spin = QDoubleSpinBox()
         self.end_spin.setRange(0.0, 1e6)
         self.end_spin.setSuffix(" s")
+        self.end_spin.valueChanged.connect(self._on_range_edited)
 
         self.log_delay_spin = QDoubleSpinBox()
         self.log_delay_spin.setRange(-1e6, 1e6)
@@ -78,11 +81,19 @@ class ManualsyncTab(QWidget):
 
         form = QFormLayout()
         form.addRow(
-            field_label("From", "Video time (seconds) where the analysed slice starts."),
+            field_label(
+                "From",
+                "Video time (seconds) where the analysed slice starts. Shared with "
+                "the Preview tab's slider and every other tab's From/To.",
+            ),
             self.start_spin,
         )
         form.addRow(
-            field_label("To", "Video time (seconds) where the analysed slice ends."),
+            field_label(
+                "To",
+                "Video time (seconds) where the analysed slice ends. Shared with "
+                "the Preview tab's slider and every other tab's From/To.",
+            ),
             self.end_spin,
         )
         form.addRow(
@@ -153,9 +164,16 @@ class ManualsyncTab(QWidget):
         # elsewhere -- run_button is managed on its own, in _run()/_on_worker_done().
         self.setEnabled(ready)
         self.run_button.setEnabled(ready and self._worker is None)
-        if ready and self.end_spin.value() == 0.0 and c.info is not None:
-            self.start_spin.setValue(0.0)
-            self.end_spin.setValue(c.info.duration)
+        if ready and c.info is not None:
+            self.start_spin.setRange(0.0, c.info.duration)
+            self.end_spin.setRange(0.0, c.info.duration)
+        if not self._suppress_range_feedback:
+            self.start_spin.blockSignals(True)
+            self.start_spin.setValue(c.range_start)
+            self.start_spin.blockSignals(False)
+            self.end_spin.blockSignals(True)
+            self.end_spin.setValue(c.range_end)
+            self.end_spin.blockSignals(False)
 
         if not self._suppress_sync_feedback:
             self.log_delay_spin.blockSignals(True)
@@ -165,6 +183,11 @@ class ManualsyncTab(QWidget):
             self.scale_spin.setValue(c.sync.scale)
             self.scale_spin.blockSignals(False)
             self.plot.update_sync(c.sync.log_delay, c.sync.scale)
+
+    def _on_range_edited(self, _value: float) -> None:
+        self._suppress_range_feedback = True
+        self.controller.set_range(self.start_spin.value(), self.end_spin.value())
+        self._suppress_range_feedback = False
 
     # ---- running -------------------------------------------------------
 

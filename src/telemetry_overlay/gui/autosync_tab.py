@@ -40,17 +40,19 @@ class AutosyncTab(QWidget):
         self.terminal = terminal
         self._worker: CommandWorker | None = None
         self._last_result = None
+        #: Guards against feeding a range change straight back into the field that
+        #: just produced it -- same pattern as manualsync_tab's log-delay drag.
+        self._suppress_range_feedback = False
 
         self.start_spin = QDoubleSpinBox()
         self.start_spin.setRange(0.0, 1e6)
         self.start_spin.setSuffix(" s")
-        self.start_spin.setValue(0.0)
+        self.start_spin.valueChanged.connect(self._on_range_edited)
 
         self.end_spin = QDoubleSpinBox()
         self.end_spin.setRange(0.0, 1e6)
         self.end_spin.setSuffix(" s")
-        self.end_spin.setSpecialValueText("end of video")
-        self.end_spin.setValue(0.0)
+        self.end_spin.valueChanged.connect(self._on_range_edited)
 
         self.windows_spin = QSpinBox()
         self.windows_spin.setRange(1, 50)
@@ -63,14 +65,18 @@ class AutosyncTab(QWidget):
 
         form = QFormLayout()
         form.addRow(
-            field_label("From", "Video time (seconds) where the analysis span starts."),
+            field_label(
+                "From",
+                "Video time (seconds) where the analysis span starts. Shared with "
+                "the Preview tab's slider and every other tab's From/To.",
+            ),
             self.start_spin,
         )
         form.addRow(
             field_label(
                 "To",
-                "Video time (seconds) where the analysis span ends. Leave at "
-                "'end of video' to use the whole rest of the clip.",
+                "Video time (seconds) where the analysis span ends. Shared with "
+                "the Preview tab's slider and every other tab's From/To.",
             ),
             self.end_spin,
         )
@@ -163,8 +169,21 @@ class AutosyncTab(QWidget):
         # _run()/_on_worker_done(), not here.
         self.setEnabled(ready)
         self.run_button.setEnabled(ready and self._worker is None)
-        if ready and self.end_spin.value() == 0.0 and c.info is not None:
-            self.end_spin.setValue(c.info.duration)
+        if ready and c.info is not None:
+            self.start_spin.setRange(0.0, c.info.duration)
+            self.end_spin.setRange(0.0, c.info.duration)
+        if not self._suppress_range_feedback:
+            self.start_spin.blockSignals(True)
+            self.start_spin.setValue(c.range_start)
+            self.start_spin.blockSignals(False)
+            self.end_spin.blockSignals(True)
+            self.end_spin.setValue(c.range_end)
+            self.end_spin.blockSignals(False)
+
+    def _on_range_edited(self, _value: float) -> None:
+        self._suppress_range_feedback = True
+        self.controller.set_range(self.start_spin.value(), self.end_spin.value())
+        self._suppress_range_feedback = False
 
     # ---- running -------------------------------------------------------
 
@@ -177,7 +196,7 @@ class AutosyncTab(QWidget):
             video=c.video,
             log=c.log,
             start=self.start_spin.value(),
-            end=self.end_spin.value() or None,
+            end=self.end_spin.value(),
             windows=self.windows_spin.value(),
             window_length=self.window_length_spin.value(),
             search_min=self.search_min_spin.value() if self.advanced_box.isChecked() else None,

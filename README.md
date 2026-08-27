@@ -475,6 +475,12 @@ Scrubbing decodes on a background thread and is debounced (~60 ms), since a dist
 seek can take a moment and must not freeze the window; the quality selector trims the
 compositing and on-screen scaling cost, not the decode itself.
 
+The Preview tab's slider carries two extra round handles besides the scrub needle:
+they set the **From**/**To** range, and that range is shared across every tab -- edit
+it on the slider, or on the From/To fields of Autosync, Manualsync or Export, and all
+of them (and the slider) update together. Click empty groove to jump the scrub needle
+there; drag a round handle to move From or To. It defaults to the whole video on load.
+
 A **Manualsync** tab checks (or sets) the alignment by eye: pick a video slice
 (**From**/**To**, defaulting to the whole video), click **Analyse** to run the same
 optical-flow tracking `manualsync` uses (the terminal shows the same progress bar the
