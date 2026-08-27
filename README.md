@@ -297,7 +297,9 @@ telemetry-overlay export <video> <log> [-p PRESET]
   which of these this machine actually supports. Default: the best available, NVENC
   first, falling back to x264.
 - `--quality N` — CQ (NVENC) or CRF (x264/x265) value; lower is higher quality and a
-  larger file. Default depends on the chosen encoder.
+  larger file. Default depends on the chosen encoder. The output bitrate is also capped
+  near the source video's own bitrate (when the source reports one), so raising quality
+  past what the source needs stops paying for it in file size once the cap is hit.
 - `--scale FACTOR` — downscale the output by this factor (e.g. `0.5` for half
   resolution) for a fast draft export while iterating on a preset or a sync. The HUD is
   unaffected: element geometry is frame-relative, so it renders correctly at any size.
@@ -466,7 +468,8 @@ stream: there is no way to avoid re-encoding it. What this tool does instead is 
 loss negligible and the process fast:
 
 - constant-quality encoding (NVENC CQ or x264 CRF) at the original resolution and exact
-  frame rate, preserving the source's colour range and matrix;
+  frame rate, preserving the source's colour range and matrix, with the bitrate also
+  capped near the source's own so re-encoding does not inflate the file size;
 - the **audio stream is copied packet by packet**, never re-encoded;
 - Python never touches the video's pixels. It draws only the HUD, into the handful of
   rectangular *bands* the layout can reach (typically a quarter of the frame area);

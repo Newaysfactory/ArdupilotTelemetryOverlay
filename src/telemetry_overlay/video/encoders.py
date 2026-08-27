@@ -34,11 +34,28 @@ class EncoderSpec:
     options: dict[str, str] = field(default_factory=dict)
     hardware: bool = False
 
-    def build_options(self, quality: int | None = None) -> dict[str, str]:
+    def build_options(
+        self, quality: int | None = None, target_bit_rate: int | None = None
+    ) -> dict[str, str]:
         opts = dict(self.options)
         opts[self.quality_option] = str(
             self.default_quality if quality is None else quality
         )
+        if target_bit_rate:
+            # Constant-quality mode alone has no size ceiling: on 4K footage it
+            # routinely asks for well over the source's own bitrate, since a camera's
+            # real-time hardware encoder compresses harder than a quality target tuned
+            # for "as close to lossless as practical" (see export.py). Capping maxrate
+            # at the source's bitrate keeps the *quality* knob as the primary control
+            # while stopping the output from growing past the original by design,
+            # per the project's "keep quality and size as close to unchanged as
+            # possible" rule (CLAUDE.md, Export).
+            opts["maxrate"] = str(target_bit_rate)
+            opts["bufsize"] = str(target_bit_rate * 2)
+            if self.hardware:
+                # NVENC's vbr rate control ignores maxrate unless an average target
+                # bitrate is also set -- the spec's default of b=0 means "unconstrained".
+                opts["b"] = str(target_bit_rate)
         return opts
 
 
@@ -51,7 +68,10 @@ ENCODERS: tuple[EncoderSpec, ...] = (
         quality_option="cq",
         default_quality=19,
         # p5/hq is the quality-leaning preset that still runs far above realtime.
-        options={"preset": "p5", "tune": "hq", "rc": "vbr", "b": "0"},
+        # profile=high matches the High profile most cameras record in (8x8
+        # transform, more CABAC tools); NVENC otherwise defaults to Main, which
+        # burns extra bits for no quality gain.
+        options={"preset": "p5", "tune": "hq", "rc": "vbr", "b": "0", "profile": "high"},
         hardware=True,
     ),
     EncoderSpec(
@@ -60,7 +80,7 @@ ENCODERS: tuple[EncoderSpec, ...] = (
         description="NVIDIA NVENC HEVC (hardware, smaller files)",
         quality_option="cq",
         default_quality=22,
-        options={"preset": "p5", "tune": "hq", "rc": "vbr", "b": "0"},
+        options={"preset": "p5", "tune": "hq", "rc": "vbr", "b": "0", "profile": "main"},
         hardware=True,
     ),
     EncoderSpec(

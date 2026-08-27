@@ -349,7 +349,7 @@ def _add_video_stream(
     stream.height = height
     stream.pix_fmt = "yuv420p"
     stream.time_base = Fraction(1, 1) / info.frame_rate
-    encoder_options = spec.build_options(options.quality)
+    encoder_options = spec.build_options(options.quality, target_bit_rate=info.bit_rate)
     encoder_options.update(options.encoder_options)
     stream.options = encoder_options
     # Carry the source's colour signalling so the burn does not shift the picture's

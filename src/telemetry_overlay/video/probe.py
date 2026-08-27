@@ -32,6 +32,9 @@ class VideoInfo:
     pix_fmt: str
     color_range: int
     colorspace: int
+    #: Source bitrate in bits/s, 0 if the container does not report one. Used to cap
+    #: the export's bitrate so the output does not balloon past the original.
+    bit_rate: int
     rotation: int
     has_audio: bool
     audio_codec: str | None
@@ -90,6 +93,7 @@ def probe_video(path: str | Path) -> VideoInfo:
             pix_fmt=str(ctx.pix_fmt),
             color_range=int(ctx.color_range or 0),
             colorspace=int(ctx.colorspace or 0),
+            bit_rate=int(stream.bit_rate or container.bit_rate or 0),
             rotation=_rotation(stream),
             has_audio=audio is not None,
             audio_codec=audio.codec_context.name if audio else None,

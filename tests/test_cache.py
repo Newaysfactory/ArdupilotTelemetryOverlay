@@ -36,6 +36,7 @@ def fake_info(frame_count: int, fps: int = 30) -> VideoInfo:
         pix_fmt="yuv420p",
         color_range=0,
         colorspace=0,
+        bit_rate=0,
         rotation=0,
         has_audio=False,
         audio_codec=None,
