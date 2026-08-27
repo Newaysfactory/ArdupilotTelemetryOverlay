@@ -469,13 +469,32 @@ optional advanced search-range limit), prints the exact same per-window table an
 verdict to the terminal, and shows the resulting diagnostic plots inline once the run
 finishes -- scroll the mouse wheel over a plot to zoom in, drag to pan, double-click to
 reset. Its **Use this result** button copies the estimated log delay/scale into the
-sync used by the Preview tab and, later, export -- never applied automatically. Every
-parameter field has a small "❓" next to its label; hover it for a description of what
-that option does.
+shared sync -- never applied automatically. Every parameter field has a small "?"
+next to its label; hover it for a description of what that option does.
 Scrubbing decodes on a background thread and is debounced (~60 ms), since a distant
 seek can take a moment and must not freeze the window; the quality selector trims the
-compositing and on-screen scaling cost, not the decode itself. More tabs (manualsync,
-export) are landing incrementally; each reuses the terminal pane for its textual output
+compositing and on-screen scaling cost, not the decode itself.
+
+A **Manualsync** tab checks (or sets) the alignment by eye: pick a video slice
+(**From**/**To**, defaulting to the whole video), click **Analyse** to run the same
+optical-flow tracking `manualsync` uses (the terminal shows the same progress bar the
+CLI prints), and get
+back an interactive plot of the log's roll rate (blue, fixed) against the video's roll
+rate (orange), both against a shared log-time axis. Unlike autosync's suggestion, this
+one is applied live: **left-drag anywhere on the plot to align the traces** -- it
+shifts the log delay in real time and writes it straight to the shared sync, the same
+live feedback as manually editing the **Log delay** field next to it (arrows nudge it
+0.1s at a time; type an exact value for finer control). Scroll to zoom in on a
+manoeuvre for fine alignment; **right-drag up/down rescales the roll-rate axis**
+(a view change only, not part of the sync) for when one trace's peaks dwarf the
+other's; **Reset view** re-fits to the video slice's current position at full height. A
+small "?" next to the plot's "Roll rate" heading explains all three gestures. A
+**Scale** field corrects a drift visible across a longer slice (dragging only ever
+changes the delay, not the scale). **Save diagnostic PNG** writes the current alignment
+to `out/gui/manualsync/` for comparison or documentation, reusing the same plotting
+function the CLI's `manualsync` uses.
+
+The Export tab is landing next; it will reuse the terminal pane for its textual output
 the same way, so nothing here duplicates what the CLI already prints.
 
 ## Tests
