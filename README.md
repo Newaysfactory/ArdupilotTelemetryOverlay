@@ -5,6 +5,31 @@ FPV-style HUD/OSD: airspeed, ground speed, altitude, height above ground, vertic
 speed, battery voltage/current/consumption, throttle, wind direction and speed,
 autopilot status messages and an artificial horizon.
 
+Tested on Windows 11 and Ubuntu 22.04 LTS.
+
+## Table of contents
+
+- [Setup](#setup)
+- [Installation](#installation)
+- [GUI](#gui)
+  - [1 · Align](#1--align)
+  - [2 · Preview](#2--preview)
+  - [3 · Export](#3--export)
+- [How to run the command](#how-to-run-the-command)
+- [Commands](#commands)
+  - [Shared options](#shared-options)
+  - [`probe` — see what you have](#probe--see-what-you-have)
+  - [`frame` — iterate on the look](#frame--iterate-on-the-look)
+  - [`autosync` — suggest a log delay and clock-drift scale](#autosync--suggest-a-log-delay-and-clock-drift-scale)
+  - [`manualsync` — check a chosen log delay by eye](#manualsync--check-a-chosen-log-delay-by-eye)
+  - [`export` — write the final video](#export--write-the-final-video)
+- [Synchronising video and telemetry](#synchronising-video-and-telemetry)
+- [Presets](#presets)
+- [Telemetry sources](#telemetry-sources)
+- [Cache](#cache)
+- [Re-encoding notes](#re-encoding-notes)
+- [Tests](#tests)
+
 ## Setup
 
 Python **3.11 or newer** is required. From the project root:
@@ -12,7 +37,7 @@ Python **3.11 or newer** is required. From the project root:
 ```bash
 python -m venv .venv
 .venv/Scripts/python.exe -m pip install -r requirements.txt   # Windows
-# or: .venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r requirements.txt                     # Linux / macOS
 ```
 
 That pulls in everything, including `matplotlib` (used by the diagnostic plots of
@@ -20,7 +45,7 @@ That pulls in everything, including `matplotlib` (used by the diagnostic plots o
 PyAV bundles a complete FFmpeg build, including the NVENC hardware encoders — `probe`
 reports which of them this machine can actually use.
 
-## How to run the command
+## Installation
 
 There is no `telemetry-overlay` file in the project root: it is a console script that
 only exists once the package is installed into the virtualenv. Pick one of the two forms
@@ -32,37 +57,10 @@ becomes available inside the virtualenv:
 
 ```bash
 .venv/Scripts/python.exe -m pip install -e .      # Windows
-# or: .venv/bin/pip install -e .
+.venv/bin/pip install -e .                        # Linux / macOS
 ```
 
-Then, from the project root:
 
-```powershell
-.venv\Scripts\telemetry-overlay.exe probe "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin"
-```
-
-Activating the venv (`.venv\Scripts\Activate.ps1`, or `source .venv/bin/activate`) lets
-you drop the path and type `telemetry-overlay` directly.
-
-**Without installing.** Run the package as a module, telling Python where the sources
-are. From the project root:
-
-```powershell
-$env:PYTHONPATH = "src"
-.venv\Scripts\python.exe -m telemetry_overlay probe "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin"
-```
-
-```bash
-# bash / Linux / macOS equivalent
-PYTHONPATH=src .venv/bin/python -m telemetry_overlay probe data/flight.MP4 data/flight.bin
-```
-
-`$env:PYTHONPATH` lasts for the current shell session only, so set it once per terminal.
-Note the quotes: paths containing spaces — like the sample log — need them.
-
-Some examples below are run against the sample flight in `data/`. Those files are too
-large to keep in git and are not part of a fresh clone: substitute your own video and
-log, the portable `flight.MP4`/`flight.bin` examples show the shape of each command.
 
 ## GUI
 
@@ -77,7 +75,7 @@ behaviour match the CLI exactly.
 ```
 
 ```bash
-# without installing
+# Linux / macOS, without installing
 PYTHONPATH=src .venv/bin/python -m telemetry_overlay.gui.app data/flight.MP4 data/flight.bin
 ```
 
@@ -166,6 +164,36 @@ summary line (frames, fps, encoder, audio, band coverage, output size) the CLI p
 Every parameter field has a small "?" next to its label; hover it for a description of
 what that option does.
 
+## How to run the command
+
+Then, from the project root:
+
+```powershell
+.venv\Scripts\telemetry-overlay.exe probe "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin"
+```
+
+Activating the venv (`.venv\Scripts\Activate.ps1`, or `source .venv/bin/activate`) lets
+you drop the path and type `telemetry-overlay` directly.
+
+**Without installing.** Run the package as a module, telling Python where the sources
+are. From the project root:
+
+```powershell
+$env:PYTHONPATH = "src"
+.venv\Scripts\python.exe -m telemetry_overlay probe "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin"
+```
+
+```bash
+# Linux / macOS equivalent
+PYTHONPATH=src .venv/bin/python -m telemetry_overlay probe data/flight.MP4 data/flight.bin
+```
+
+`$env:PYTHONPATH` lasts for the current shell session only, so set it once per terminal.
+Note the quotes: paths containing spaces — like the sample log — need them.
+
+Some examples below are run against the sample flight in `data/`. Those files are too
+large to keep in git and are not part of a fresh clone: substitute your own video and
+log, the portable `flight.MP4`/`flight.bin` examples show the shape of each command.
 
 ## Commands
 
