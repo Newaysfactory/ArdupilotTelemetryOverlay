@@ -494,8 +494,17 @@ changes the delay, not the scale). **Save diagnostic PNG** writes the current al
 to `out/gui/manualsync/` for comparison or documentation, reusing the same plotting
 function the CLI's `manualsync` uses.
 
-The Export tab is landing next; it will reuse the terminal pane for its textual output
-the same way, so nothing here duplicates what the CLI already prints.
+An **Export** tab burns the overlay into a video file: output path (browsable,
+defaulting to `out/<video>.overlay.mp4`), **From**/**To** (defaulting to the whole
+video), an **Encoder** dropdown populated from the encoders actually usable on this
+machine (`available_encoders()` -- the same hardware-first probing `probe` uses), a
+**Quality** field (blank keeps the encoder's own default), a downscale **Scale** for a
+fast draft export, and **Copy audio**/**Overwrite if it exists** checkboxes. It does not
+go through `cmd_export` -- see the note on the `--scale`/`--time-scale` collision in
+`cli.py` below -- but calls `export_video()` directly with the current preset and
+shared sync, so the result is identical to running `export` from the CLI with the same
+options. The terminal shows the same `\r`-updated progress bar and the same final
+summary line (frames, fps, encoder, audio, band coverage, output size) the CLI prints.
 
 ## Tests
 

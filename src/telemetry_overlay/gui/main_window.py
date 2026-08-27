@@ -27,6 +27,7 @@ from ..cli import DEFAULT_PRESET, cmd_probe
 from ..telemetry import read_log
 from .autosync_tab import AutosyncTab
 from .controller import ProjectController
+from .export_tab import ExportTab
 from .manualsync_tab import ManualsyncTab
 from .preview_tab import PreviewTab
 from .terminal import TerminalWidget
@@ -102,6 +103,8 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.autosync_tab, "Autosync")
         self.manualsync_tab = ManualsyncTab(self.controller, self.terminal)
         self.tabs.addTab(self.manualsync_tab, "Manualsync")
+        self.export_tab = ExportTab(self.controller, self.terminal)
+        self.tabs.addTab(self.export_tab, "Export")
         splitter.addWidget(self.tabs)
         splitter.addWidget(self.terminal)
         splitter.setStretchFactor(0, 4)
