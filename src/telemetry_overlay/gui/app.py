@@ -7,9 +7,12 @@ import logging
 import sys
 from pathlib import Path
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from .main_window import MainWindow
+
+ICON_PATH = Path(__file__).resolve().parent / "assets" / "icon.ico"
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -35,6 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     # whatever QGuiApplication.instance() already exists, so the widget-capable
     # QApplication must exist first.
     app = QApplication(sys.argv[:1])
+    app.setWindowIcon(QIcon(str(ICON_PATH)))
     window = MainWindow()
 
     if args.preset is not None:

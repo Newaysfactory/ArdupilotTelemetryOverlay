@@ -26,6 +26,9 @@ telemetry-overlay-gui = "telemetry_overlay.gui.app:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"telemetry_overlay.gui" = ["assets/*.png", "assets/*.ico", "assets/*.icns"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
