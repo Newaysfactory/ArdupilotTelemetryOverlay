@@ -25,7 +25,6 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFrame,
@@ -118,18 +117,14 @@ class AlignTab(QWidget):
             )
         )
 
-        groups = QHBoxLayout()
-        groups.setSpacing(14)
-        # AlignTop: the two groups are different heights, and the shorter one
-        # should keep its natural size instead of stretching into a hollow box.
-        groups.addWidget(self._build_search_group(), 0, Qt.AlignmentFlag.AlignTop)
-        groups.addWidget(self._build_alignment_group(), 0, Qt.AlignmentFlag.AlignTop)
-        groups.addStretch(1)
-        layout.addLayout(groups)
-
-        layout.addWidget(self._build_result_card())
-        layout.addLayout(self._build_plot_headers())
-        layout.addLayout(self._build_plots(), 1)
+        # Controls down the left, output down the right: the plots are what the
+        # user looks at while dragging, so they get the height a stacked-on-top
+        # layout could not give them.
+        columns = QHBoxLayout()
+        columns.setSpacing(16)
+        columns.addWidget(self._build_controls_column(), 0)
+        columns.addLayout(self._build_output_column(), 1)
+        layout.addLayout(columns, 1)
 
         self.setEnabled(False)
         controller.state_changed.connect(self._on_state_changed)
@@ -291,12 +286,15 @@ class AlignTab(QWidget):
             "QFrame#resultCard { background: palette(alternate-base); "
             "border: 1px solid palette(mid); border-radius: 6px; }"
         )
-        layout = QHBoxLayout(card)
-        layout.setContentsMargins(14, 10, 14, 10)
+        # Stacked, not side by side: this sits in the narrow controls column, where
+        # a horizontal card squeezed the button against four lines of wrapped text.
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(14, 10, 14, 12)
+        layout.setSpacing(10)
 
         self.status_label = QLabel()
         self.status_label.setWordWrap(True)
-        layout.addWidget(self.status_label, 1)
+        layout.addWidget(self.status_label)
 
         self.save_button = primary_button("Save alignment")
         self.save_button.setToolTip(
@@ -305,16 +303,36 @@ class AlignTab(QWidget):
             "the only thing that puts it on disk."
         )
         self.save_button.clicked.connect(self._save_alignment)
-        layout.addWidget(self.save_button)
+        button_row = QHBoxLayout()
+        button_row.addWidget(self.save_button)
+        button_row.addStretch(1)
+        layout.addLayout(button_row)
         return card
 
-    def _build_plot_headers(self) -> QHBoxLayout:
-        headers = QHBoxLayout()
+    def _build_controls_column(self) -> QWidget:
+        """Everything the user sets, in one column: the search, then its result."""
+        column = QWidget()
+        # Kept to its natural width so the plots take the rest; without this the
+        # column would share the window evenly with them.
+        column.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        layout = QVBoxLayout(column)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+        layout.addWidget(self._build_search_group())
+        layout.addWidget(self._build_alignment_group())
+        layout.addWidget(self._build_result_card())
+        layout.addStretch(1)
+        return column
 
-        left = QHBoxLayout()
-        left.addWidget(section_label("Roll rate — drag to align"))
-        left.addWidget(help_icon(_PLOT_HELP))
-        left.addStretch(1)
+    def _build_output_column(self) -> QVBoxLayout:
+        """The two plots, stacked: the interactive one first, the fit under it."""
+        column = QVBoxLayout()
+        column.setSpacing(8)
+
+        roll_header = QHBoxLayout()
+        roll_header.addWidget(section_label("Roll rate — drag to align"))
+        roll_header.addWidget(help_icon(_PLOT_HELP))
+        roll_header.addStretch(1)
         # These act on the plot, so they belong with it rather than among the
         # parameters, where they left a half-empty box.
         self.reset_view_button = QPushButton("Reset view")
@@ -327,32 +345,27 @@ class AlignTab(QWidget):
             "for comparison or documentation -- the live plot is not a file."
         )
         self.save_png_button.clicked.connect(self._save_plot)
-        left.addWidget(self.reset_view_button)
-        left.addWidget(self.save_png_button)
-
-        right = QHBoxLayout()
-        right.addWidget(section_label("Window fit"))
-        right.addWidget(help_icon(_FIT_HELP))
-        right.addStretch(1)
-
-        headers.addLayout(left, 2)
-        headers.addLayout(right, 1)
-        return headers
-
-    def _build_plots(self) -> QHBoxLayout:
-        plots = QHBoxLayout()
-        plots.setSpacing(12)
+        roll_header.addWidget(self.reset_view_button)
+        roll_header.addWidget(self.save_png_button)
+        column.addLayout(roll_header)
 
         self.plot = ManualSyncPlot()
         self.plot.delta_dragged.connect(self._on_delta_dragged)
-        plots.addWidget(self.plot, 2)
+        # The one the user actually manipulates, so it gets the larger share.
+        column.addWidget(self.plot, 3)
+
+        fit_header = QHBoxLayout()
+        fit_header.addWidget(section_label("Window fit"))
+        fit_header.addWidget(help_icon(_FIT_HELP))
+        fit_header.addStretch(1)
+        column.addLayout(fit_header)
 
         self.fit_pane = ZoomableImageView(
             "Fit plot appears here after a run with more than one window."
         )
         self.fit_pane.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        plots.addWidget(self.fit_pane, 1)
-        return plots
+        column.addWidget(self.fit_pane, 2)
+        return column
 
     # ---- reacting to the shared project state -----------------------------
 

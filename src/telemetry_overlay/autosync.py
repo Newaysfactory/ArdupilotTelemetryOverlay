@@ -29,10 +29,12 @@ log = logging.getLogger(__name__)
 
 #: Forced on the two diagnostic-plot functions below, regardless of any matplotlib
 #: style/rcParams active in the process (a system-wide dark ``matplotlibrc``, or a
-#: style another part of the app may have set). These are saved PNGs read back by
-#: ``ZoomableImageView`` inside a dark-themed window; without pinning the colours
-#: explicitly, an ambient dark style renders black/dark-grey text and lines on a
-#: dark or transparent background -- readable nowhere.
+#: style another part of the app may have set). These are saved PNGs, read back by
+#: ``ZoomableImageView`` and also opened straight from disk; without pinning the
+#: colours explicitly, an ambient dark style renders black/dark-grey text and lines
+#: on a dark or transparent background -- readable nowhere. The GUI pane showing
+#: them is painted light *because* these are pinned light, so the two must stay in
+#: step: do not make these plots follow a theme.
 _LIGHT_PLOT_STYLE = {
     "figure.facecolor": "white",
     "savefig.facecolor": "white",

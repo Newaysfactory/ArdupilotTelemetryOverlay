@@ -516,7 +516,8 @@ between guessing and knowing what the export will render:
 
 ### 1 · Align
 
-One tab for one job. It carries both ways of aligning, because they produce the same
+One tab for one job, in two columns: everything you set down the left, everything you
+look at down the right. It carries both ways of aligning, because they produce the same
 two numbers:
 
 - **Automatic search** — **From**/**To**, **Windows**, **Window length** and an
@@ -535,9 +536,10 @@ axis. **Left-drag the orange trace** to correct the alignment by hand -- it upda
 Log delay field live, exactly as if you had typed it. Scroll to zoom the time axis;
 **right-drag up/down rescales the roll-rate axis** (a view change only) for when one
 trace's peaks dwarf the other's; **Reset view** re-fits to the video trace's current
-position. A "?" next to the plot heading explains all three gestures. Beside it, the
+position. A "?" next to the plot heading explains all three gestures. Under it, the
 **Window fit** pane shows `autosync_fit.png` when the run used more than one window:
-one point per window, and a straight line through them is the drift.
+one point per window, and a straight line through them is the drift (scroll to zoom,
+drag to pan, double-click to re-fit).
 
 Running the search and dragging the plot both change the alignment **for this session
 only** -- the preview and the export follow along immediately, but nothing is written

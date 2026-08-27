@@ -40,10 +40,16 @@ class ZoomableImageView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setMinimumSize(320, 200)
-        # "color" is deliberately not set here: QGraphicsTextItem (the placeholder,
-        # added in _show_placeholder) is painted directly into the scene and does not
-        # pick up the view's stylesheet -- its colour has to be set on the item itself.
-        self.setStyleSheet("background-color: #202020; border: none;")
+        # Painted in the window's own base colour rather than a fixed dark grey: the
+        # plots shown here are pinned to a light matplotlib style (see autosync.py),
+        # so a dark pane framed them in a black box that matched nothing else on the
+        # tab. "color" is deliberately not set here: QGraphicsTextItem (the
+        # placeholder, added in _show_placeholder) is painted directly into the scene
+        # and does not pick up the view's stylesheet -- its colour has to be set on
+        # the item itself.
+        self.setStyleSheet(
+            "background-color: palette(base); border: 1px solid palette(mid);"
+        )
         self.setToolTip("Scroll to zoom, drag to pan, double-click to reset")
         self._show_placeholder(placeholder)
 
@@ -66,11 +72,11 @@ class ZoomableImageView(QGraphicsView):
         self._scene.clear()
         self._pixmap_item = None
         # QGraphicsTextItem ignores the view's stylesheet -- it is painted directly
-        # into the scene, not styled by Qt's CSS cascade -- so without this it
-        # defaults to black text, which is next to invisible on this view's own
-        # dark (#202020) background. Set the colour on the item itself instead.
+        # into the scene, not styled by Qt's CSS cascade -- so its colour has to be
+        # set on the item. Taken from the palette rather than hardcoded so it stays
+        # readable against whichever base colour the pane is painted in.
         item = self._scene.addText(text)
-        item.setDefaultTextColor(QColor("#aaaaaa"))
+        item.setDefaultTextColor(QColor(self.palette().mid().color()))
         self.resetTransform()
         # Centre on the text explicitly: a placeholder shown right after a real,
         # zoomed/panned image (e.g. switching to a video with nothing cached yet)
