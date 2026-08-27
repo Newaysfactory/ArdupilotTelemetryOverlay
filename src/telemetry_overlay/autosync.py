@@ -717,8 +717,11 @@ def _compute_pair_range(
     # A fresh reader per range, deliberately: reusing one container across several
     # seeks while a Qt event loop runs in the same process is the pathology
     # documented in CLAUDE.md. Ranges are few and long, so the extra container
-    # opens cost nothing next to the decoding.
-    with FrameReader(path, info) as reader:
+    # opens cost nothing next to the decoding. thread_type="AUTO" is safe here
+    # (unlike the scrubbing reader): this loop seeks once, then reads forward
+    # sequentially through the whole range -- the same shape as export.py's decode
+    # loop, which CLAUDE.md documents as unaffected by the AUTO+seek pathology.
+    with FrameReader(path, info, thread_type="AUTO") as reader:
         for index in range(first_pair, last_pair + 2):
             try:
                 frame = reader.frame_at_index(index)
