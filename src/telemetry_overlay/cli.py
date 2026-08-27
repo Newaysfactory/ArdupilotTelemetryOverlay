@@ -357,7 +357,16 @@ def cmd_frame(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_autosync(args: argparse.Namespace) -> int:
+def cmd_autosync(
+    args: argparse.Namespace, *, result_sink: list | None = None
+) -> int:
+    """``result_sink``, if given, receives the computed ``SyncFitResult``.
+
+    Not a CLI option: it lets the GUI reuse this exact function (identical
+    printed output, identical plot files) while still getting the structured
+    result back for its "use this result" button, without recomputing the
+    optical flow a second time.
+    """
     from .autosync import SyncFitOptions, estimate_sync
     from .video.probe import probe_video
 
@@ -385,6 +394,8 @@ def cmd_autosync(args: argparse.Namespace) -> int:
         info=info,
         progress=lambda f: _progress_bar("  tracking", f),
     )
+    if result_sink is not None:
+        result_sink.append(result)
     print()
     if len(result.windows) > 1:
         print("  window start   log delay   correlation  confidence  used")

@@ -460,15 +460,23 @@ PYTHONPATH=src .venv/bin/python -m telemetry_overlay.gui.app data/flight.MP4 dat
 
 Currently implemented: drag&drop (or **Browse...**) loading of the video, the `.bin`
 log and the preset; a **Probe** button that runs `probe` and prints its report to the
-terminal pane at the bottom of the window, shared by every command the GUI runs; and a
+terminal pane at the bottom of the window, shared by every command the GUI runs; a
 **Preview** tab with a scrub slider, an exact-time field and a **Quality** selector
 (Full / 1/2 / 1/4) showing the overlay composited on the actual video frame, exactly
-like `frame` but live and interactive. Scrubbing decodes on a background thread and is
-debounced (~60 ms), since a distant seek can take a moment and must not freeze the
-window; the quality selector trims the compositing and on-screen scaling cost, not the
-decode itself. More tabs (autosync, manualsync, export) are landing incrementally; each
-reuses the terminal pane for its textual output the same way, so nothing here
-duplicates what the CLI already prints.
+like `frame` but live and interactive; and an **Autosync** tab that runs `autosync` in
+the background with the same options as the CLI (from/to, windows, window length, an
+optional advanced search-range limit), prints the exact same per-window table and
+verdict to the terminal, and shows the resulting diagnostic plots inline once the run
+finishes -- scroll the mouse wheel over a plot to zoom in, drag to pan, double-click to
+reset. Its **Use this result** button copies the estimated log delay/scale into the
+sync used by the Preview tab and, later, export -- never applied automatically. Every
+parameter field has a small "❓" next to its label; hover it for a description of what
+that option does.
+Scrubbing decodes on a background thread and is debounced (~60 ms), since a distant
+seek can take a moment and must not freeze the window; the quality selector trims the
+compositing and on-screen scaling cost, not the decode itself. More tabs (manualsync,
+export) are landing incrementally; each reuses the terminal pane for its textual output
+the same way, so nothing here duplicates what the CLI already prints.
 
 ## Tests
 

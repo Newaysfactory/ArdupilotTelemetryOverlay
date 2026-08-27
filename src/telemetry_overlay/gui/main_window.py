@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from ..cli import DEFAULT_PRESET, cmd_probe
 from ..telemetry import read_log
+from .autosync_tab import AutosyncTab
 from .controller import ProjectController
 from .preview_tab import PreviewTab
 from .terminal import TerminalWidget
@@ -96,6 +97,8 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.preview_tab = PreviewTab(self.controller)
         self.tabs.addTab(self.preview_tab, "Preview")
+        self.autosync_tab = AutosyncTab(self.controller, self.terminal)
+        self.tabs.addTab(self.autosync_tab, "Autosync")
         splitter.addWidget(self.tabs)
         splitter.addWidget(self.terminal)
         splitter.setStretchFactor(0, 4)

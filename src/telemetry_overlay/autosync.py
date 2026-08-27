@@ -496,7 +496,9 @@ def save_fit_plot(
 
     fig.tight_layout()
     path = output_dir / filename
-    fig.savefig(path, dpi=150)
+    # 300dpi (vs. matplotlib's 150 default): the GUI's ZoomableImageView lets the
+    # user zoom well past 1:1, and a 150dpi PNG turns visibly blocky under that.
+    fig.savefig(path, dpi=300)
     plt.close(fig)
     return path
 
@@ -802,7 +804,7 @@ def save_diagnostic_plots(
 
     fig.tight_layout()
     path = output_dir / filename
-    fig.savefig(path, dpi=150)
+    fig.savefig(path, dpi=300)
     plt.close(fig)
     return path
 
