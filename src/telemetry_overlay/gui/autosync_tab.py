@@ -250,6 +250,7 @@ class AutosyncTab(QWidget):
         result_sink: list = []
         self.run_button.setEnabled(False)
         self.use_button.setEnabled(False)
+        self.result_label.setStyleSheet("font-weight: bold; color: palette(link);")
         self.result_label.setText("Running...")
         self.diagnostics_pane.clear_image()
         self.fit_pane.clear_image()
@@ -269,6 +270,7 @@ class AutosyncTab(QWidget):
         self._on_state_changed()
 
     def _on_finished(self, result_sink: list) -> None:
+        self.result_label.setStyleSheet("")
         if not result_sink:
             self.result_label.setText("Autosync did not produce a result (see terminal).")
             return
@@ -290,6 +292,7 @@ class AutosyncTab(QWidget):
             self.fit_pane.show_image(fit_path)
 
     def _on_failed(self, message: str) -> None:
+        self.result_label.setStyleSheet("")
         self.result_label.setText(f"Autosync failed: {message}")
 
     def _use_result(self) -> None:
