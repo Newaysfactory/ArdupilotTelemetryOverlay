@@ -5,12 +5,6 @@ FPV-style HUD/OSD: airspeed, ground speed, altitude, height above ground, vertic
 speed, battery voltage/current/consumption, throttle, wind direction and speed,
 autopilot status messages and an artificial horizon.
 
-Phase 1 is the command-line core, documented below. Phase 2 is a PySide6 GUI (see
-[GUI](#gui)): a control panel over the same CLI commands, with drag&drop loading, an
-overlay preview, and an interactive plot for manual sync -- it calls the exact same
-`cmd_probe`/`cmd_autosync`/`export_video` code the CLI uses, so nothing here is
-reimplemented for the GUI.
-
 ## Setup
 
 Python **3.11 or newer** is required. From the project root:
@@ -69,6 +63,109 @@ Note the quotes: paths containing spaces — like the sample log — need them.
 Some examples below are run against the sample flight in `data/`. Those files are too
 large to keep in git and are not part of a fresh clone: substitute your own video and
 log, the portable `flight.MP4`/`flight.bin` examples show the shape of each command.
+
+## GUI
+
+A PySide6 control panel over the CLI commands above, for anyone who would rather drag
+files in and click a button than type flags. It is a thin layer: every action calls the
+same `cmd_probe`/`cmd_autosync`/`export_video`/... code the CLI uses, so its output and
+behaviour match the CLI exactly.
+
+```powershell
+.venv\Scripts\telemetry-overlay-gui.exe                                    # empty, drag files in
+.venv\Scripts\telemetry-overlay-gui.exe "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin"
+```
+
+```bash
+# without installing
+PYTHONPATH=src .venv/bin/python -m telemetry_overlay.gui.app data/flight.MP4 data/flight.bin
+```
+
+The window is organised as three numbered tabs -- **1 · Align**, **2 · Preview**,
+**3 · Export** -- in the order the work actually happens, above a terminal pane shared
+by every command the GUI runs. Above the tabs sits a project header that stays visible
+whichever tab you are on: the video, log and preset pickers (click one to change it;
+drag&drop works anywhere in the window), a **Probe** button that runs `probe` and
+prints its report to the terminal, a **Clear cache** button, and -- on the second row
+-- the current alignment and the source video's properties.
+
+The alignment shown in that header has three states, and they are the difference
+between guessing and knowing what the export will render:
+
+- `! not aligned yet — run Align` — no alignment established for this video;
+- `● delay ... · drift ... — not saved` — a working alignment that is **not** in
+  `sync.json` yet;
+- `✓ delay ... · drift ...` — matches what is on disk.
+
+### 1 · Align
+
+One tab for one job, in two columns: everything you set down the left, everything you
+look at down the right. It carries both ways of aligning, because they produce the same
+two numbers:
+
+- **Automatic search** — **From**/**To**, **Windows**, **Window length** and an
+  optional advanced search-range limit, then **Run auto align**. This runs the very
+  same `autosync` code the CLI runs, printing the identical per-window table, verdict
+  and progress bar to the terminal.
+- **Current alignment** — the **Log delay** and **Clock drift** fields. Clock drift is
+  `scale` under its own name: alongside the raw factor the GUI shows what it means
+  (`= +1.47 s every 1000 s`), because `1.001467` is impossible to judge on its own.
+  `--time-scale` and the `scale` key in `sync.json` are unchanged, so existing files
+  keep working.
+
+The result is not a static picture: it lands in an interactive **roll rate** plot of
+the log's roll rate (blue, fixed) against the video's (orange), on a shared log-time
+axis. **Left-drag the orange trace** to correct the alignment by hand -- it updates the
+Log delay field live, exactly as if you had typed it. Scroll to zoom the time axis;
+**right-drag up/down rescales the roll-rate axis** (a view change only) for when one
+trace's peaks dwarf the other's; **Reset view** re-fits to the video trace's current
+position. A "?" next to the plot heading explains all three gestures. Under it, the
+**Window fit** pane shows `autosync_fit.png` when the run used more than one window:
+one point per window, and a straight line through them is the drift (scroll to zoom,
+drag to pan, double-click to re-fit).
+
+Running the search and dragging the plot both change the alignment **for this session
+only** -- the preview and the export follow along immediately, but nothing is written
+to disk until you press **Save alignment**, which writes this video's `sync.json`. The
+header's `— not saved` marker tells you when there is work you have not kept.
+**Save diagnostic PNG** writes a snapshot of the current alignment to the video's
+`cache/` directory, reusing the same plotting function the CLI uses.
+
+If the current From/To span's optical flow is already fully cached (see [Cache](#cache))
+the tab runs the analysis by itself when you open it, since a cache hit costs nothing;
+otherwise the plot shows `No analysis yet -- click 'Run auto align'.`
+
+### 2 · Preview
+
+The overlay composited on the actual video frame, exactly like `frame` but live: a
+scrub slider, an exact-time field and a **Quality** selector (Full / 1/2 / 1/4).
+Decoding happens on a background thread and is debounced (~60 ms), since a distant seek
+can take a moment and must not freeze the window; the quality selector trims the
+compositing and on-screen scaling cost, not the decode itself.
+
+The slider carries two extra round handles besides the scrub needle: they set the
+**From**/**To** range shared with the Align and Export tabs -- edit it here or in
+either tab's fields and everything updates together. Click empty groove to jump the
+needle there; drag a round handle to move From or To. It defaults to the whole video.
+
+### 3 · Export
+
+Burns the overlay into a video file: output path (browsable, defaulting to
+`<video>.overlay.mp4` next to the source video), **From**/**To**, an **Encoder**
+dropdown populated from the encoders actually usable on this machine
+(`available_encoders()` -- the same hardware-first probing `probe` uses), a **Quality**
+field (blank keeps the encoder's own default), a **Downscale** factor for a fast draft
+export, and **Copy audio**/**Overwrite if it exists** checkboxes. It does not go
+through `cmd_export` -- see the note on the `--scale`/`--time-scale` collision in
+`cli.py` below -- but calls `export_video()` directly with the current preset and
+shared sync, so the result is identical to running `export` from the CLI with the same
+options. The terminal shows the same `
+`-updated progress bar and the same final
+summary line (frames, fps, encoder, audio, band coverage, output size) the CLI prints.
+
+Every parameter field has a small "?" next to its label; hover it for a description of
+what that option does.
+
 
 ## Commands
 
@@ -462,7 +559,7 @@ one you were working on. Files written by older versions, next to the video as
 `<video>.sync.json`, are still read if the new location is empty; the next save moves
 them.
 
-## About "without re-encoding"
+## Re-encoding notes
 
 Burning pixels into a picture requires decoding, compositing and encoding the video
 stream: there is no way to avoid re-encoding it. What this tool does instead is keep the
@@ -481,106 +578,6 @@ If you want the original file left untouched, the alternative is to composite in
 editor. Exporting the HUD alone to a file with an alpha channel is not implemented yet;
 `frame --overlay-only` produces single transparent PNGs today.
 
-## GUI
-
-A PySide6 control panel over the CLI commands above, for anyone who would rather drag
-files in and click a button than type flags. It is a thin layer: every action calls the
-same `cmd_probe`/`cmd_autosync`/`export_video`/... code the CLI uses, so its output and
-behaviour match the CLI exactly.
-
-```powershell
-.venv\Scripts\telemetry-overlay-gui.exe                                    # empty, drag files in
-.venv\Scripts\telemetry-overlay-gui.exe "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin"
-```
-
-```bash
-# without installing
-PYTHONPATH=src .venv/bin/python -m telemetry_overlay.gui.app data/flight.MP4 data/flight.bin
-```
-
-The window is organised as three numbered tabs -- **1 · Align**, **2 · Preview**,
-**3 · Export** -- in the order the work actually happens, above a terminal pane shared
-by every command the GUI runs. Above the tabs sits a project header that stays visible
-whichever tab you are on: the video, log and preset pickers (click one to change it;
-drag&drop works anywhere in the window), a **Probe** button that runs `probe` and
-prints its report to the terminal, a **Clear cache** button, and -- on the second row
--- the current alignment and the source video's properties.
-
-The alignment shown in that header has three states, and they are the difference
-between guessing and knowing what the export will render:
-
-- `! not aligned yet — run Align` — no alignment established for this video;
-- `● delay ... · drift ... — not saved` — a working alignment that is **not** in
-  `sync.json` yet;
-- `✓ delay ... · drift ...` — matches what is on disk.
-
-### 1 · Align
-
-One tab for one job, in two columns: everything you set down the left, everything you
-look at down the right. It carries both ways of aligning, because they produce the same
-two numbers:
-
-- **Automatic search** — **From**/**To**, **Windows**, **Window length** and an
-  optional advanced search-range limit, then **Run auto align**. This runs the very
-  same `autosync` code the CLI runs, printing the identical per-window table, verdict
-  and progress bar to the terminal.
-- **Current alignment** — the **Log delay** and **Clock drift** fields. Clock drift is
-  `scale` under its own name: alongside the raw factor the GUI shows what it means
-  (`= +1.47 s every 1000 s`), because `1.001467` is impossible to judge on its own.
-  `--time-scale` and the `scale` key in `sync.json` are unchanged, so existing files
-  keep working.
-
-The result is not a static picture: it lands in an interactive **roll rate** plot of
-the log's roll rate (blue, fixed) against the video's (orange), on a shared log-time
-axis. **Left-drag the orange trace** to correct the alignment by hand -- it updates the
-Log delay field live, exactly as if you had typed it. Scroll to zoom the time axis;
-**right-drag up/down rescales the roll-rate axis** (a view change only) for when one
-trace's peaks dwarf the other's; **Reset view** re-fits to the video trace's current
-position. A "?" next to the plot heading explains all three gestures. Under it, the
-**Window fit** pane shows `autosync_fit.png` when the run used more than one window:
-one point per window, and a straight line through them is the drift (scroll to zoom,
-drag to pan, double-click to re-fit).
-
-Running the search and dragging the plot both change the alignment **for this session
-only** -- the preview and the export follow along immediately, but nothing is written
-to disk until you press **Save alignment**, which writes this video's `sync.json`. The
-header's `— not saved` marker tells you when there is work you have not kept.
-**Save diagnostic PNG** writes a snapshot of the current alignment to the video's
-`cache/` directory, reusing the same plotting function the CLI uses.
-
-If the current From/To span's optical flow is already fully cached (see [Cache](#cache))
-the tab runs the analysis by itself when you open it, since a cache hit costs nothing;
-otherwise the plot shows `No analysis yet -- click 'Run auto align'.`
-
-### 2 · Preview
-
-The overlay composited on the actual video frame, exactly like `frame` but live: a
-scrub slider, an exact-time field and a **Quality** selector (Full / 1/2 / 1/4).
-Decoding happens on a background thread and is debounced (~60 ms), since a distant seek
-can take a moment and must not freeze the window; the quality selector trims the
-compositing and on-screen scaling cost, not the decode itself.
-
-The slider carries two extra round handles besides the scrub needle: they set the
-**From**/**To** range shared with the Align and Export tabs -- edit it here or in
-either tab's fields and everything updates together. Click empty groove to jump the
-needle there; drag a round handle to move From or To. It defaults to the whole video.
-
-### 3 · Export
-
-Burns the overlay into a video file: output path (browsable, defaulting to
-`<video>.overlay.mp4` next to the source video), **From**/**To**, an **Encoder**
-dropdown populated from the encoders actually usable on this machine
-(`available_encoders()` -- the same hardware-first probing `probe` uses), a **Quality**
-field (blank keeps the encoder's own default), a **Downscale** factor for a fast draft
-export, and **Copy audio**/**Overwrite if it exists** checkboxes. It does not go
-through `cmd_export` -- see the note on the `--scale`/`--time-scale` collision in
-`cli.py` below -- but calls `export_video()` directly with the current preset and
-shared sync, so the result is identical to running `export` from the CLI with the same
-options. The terminal shows the same ``-updated progress bar and the same final
-summary line (frames, fps, encoder, audio, band coverage, output size) the CLI prints.
-
-Every parameter field has a small "?" next to its label; hover it for a description of
-what that option does.
 
 ## Tests
 
