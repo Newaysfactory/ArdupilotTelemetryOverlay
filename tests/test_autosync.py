@@ -77,7 +77,7 @@ class TestCorrelate:
         log_rate = np.gradient(roll, t[1] - t[0])
         video_rate = np.interp(true_offset + video_times, t, log_rate)
 
-        result = _correlate(video_rate, info, channel, AutoSyncOptions(), window, 0)
+        result = _correlate(video_rate, info, channel, AutoSyncOptions(), window, 0, video_time0=0.0)
         assert result.log_delay == pytest.approx(true_offset, abs=0.1)
         assert result.correlation > 0.9
         assert result.trustworthy
@@ -101,7 +101,7 @@ class TestCorrelate:
         ) + rng.normal(0, 20.0, video_times.size)
 
         options = AutoSyncOptions(start=start, window=window)
-        result = _correlate(video_rate, info, channel, options, window, 0)
+        result = _correlate(video_rate, info, channel, options, window, 0, video_time0=start)
         assert result.log_delay == pytest.approx(true_offset, abs=0.2)
 
     def test_flat_signal_is_rejected_not_guessed(self):
@@ -109,7 +109,7 @@ class TestCorrelate:
         t, roll = _rolling_flight()
         channel = roll_channel(t, roll)
         flat = np.zeros(300)
-        result = _correlate(flat, info, channel, AutoSyncOptions(), 10.0, 0)
+        result = _correlate(flat, info, channel, AutoSyncOptions(), 10.0, 0, video_time0=0.0)
         assert not result.trustworthy
         assert result.warning
 
@@ -119,7 +119,7 @@ class TestCorrelate:
         channel = roll_channel(t, roll)
         rng = np.random.default_rng(11)
         noise = rng.normal(0, 50, 900)
-        result = _correlate(noise, info, channel, AutoSyncOptions(), 30.0, 0)
+        result = _correlate(noise, info, channel, AutoSyncOptions(), 30.0, 0, video_time0=0.0)
         assert not result.trustworthy
 
     def test_search_range_is_honoured(self):
@@ -132,7 +132,7 @@ class TestCorrelate:
         video_rate = np.interp(41.0 + video_times, t, log_rate)
 
         options = AutoSyncOptions(search_min=60.0, search_max=80.0)
-        result = _correlate(video_rate, info, channel, options, 30.0, 0)
+        result = _correlate(video_rate, info, channel, options, 30.0, 0, video_time0=0.0)
         assert 60.0 <= result.log_delay <= 80.0
         # Forced away from the true peak, the result must not claim to be reliable.
         assert not result.trustworthy

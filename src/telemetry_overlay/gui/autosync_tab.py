@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..autosync import flow_is_cached
+from ..cache import ensure_cache_dir_for
 from ..cli import cmd_autosync
 from ..sync import SyncModel
 from .controller import ProjectController
@@ -24,9 +26,6 @@ from .terminal import TerminalWidget
 from .widgets import field_label
 from .workers import CommandWorker
 from .zoomable_image_view import ZoomableImageView
-
-#: Where the GUI asks autosync to save its diagnostic plots.
-_PLOT_DIR = Path("out") / "gui" / "autosync"
 
 
 class AutosyncTab(QWidget):
@@ -40,9 +39,14 @@ class AutosyncTab(QWidget):
         self.terminal = terminal
         self._worker: CommandWorker | None = None
         self._last_result = None
+        self._plot_dir: Path | None = None
         #: Guards against feeding a range change straight back into the field that
         #: just produced it -- same pattern as manualsync_tab's log-delay drag.
         self._suppress_range_feedback = False
+        #: The video the auto-populate-on-open check has already run for (or
+        #: attempted and found nothing cached) -- reset when a different video
+        #: loads, so it is tried again, but not on every unrelated state change.
+        self._auto_populate_video: Path | None = None
 
         self.start_spin = QDoubleSpinBox()
         self.start_spin.setRange(0.0, 1e6)
@@ -180,18 +184,57 @@ class AutosyncTab(QWidget):
             self.end_spin.setValue(c.range_end)
             self.end_spin.blockSignals(False)
 
+        if c.video != self._auto_populate_video:
+            # A different (or newly loaded) video: forget any previous result --
+            # it belonged to the old one -- and give the auto-populate check
+            # another chance.
+            self._auto_populate_video = c.video
+            self._last_result = None
+            self.use_button.setEnabled(False)
+            self.result_label.setText("No result yet.")
+            self.diagnostics_pane.clear_image()
+            self.fit_pane.clear_image()
+        self._maybe_auto_populate()
+
     def _on_range_edited(self, _value: float) -> None:
         self._suppress_range_feedback = True
         self.controller.set_range(self.start_spin.value(), self.end_spin.value())
         self._suppress_range_feedback = False
 
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt override
+        super().showEvent(event)
+        self._maybe_auto_populate()
+
+    def _maybe_auto_populate(self) -> None:
+        """Run automatically if this exact span's optical flow is already cached.
+
+        Cheap: reading the cache is a small file read, and a run that hits the
+        cache entirely finishes in milliseconds -- no different from the user
+        having just clicked "Run autosync" themselves. Only tried once per
+        loaded video (via ``_last_result``, reset in ``_on_state_changed`` when
+        the video changes) so re-showing the tab does not keep re-checking.
+        """
+        c = self.controller
+        if self._worker is not None or self._last_result is not None:
+            return
+        if not self.isVisible():
+            return
+        if not (c.video and c.log and c.telemetry and c.info):
+            return
+        if not flow_is_cached(c.video, c.info, self.start_spin.value(), self.end_spin.value()):
+            return
+        self._run(auto=True)
+
     # ---- running -------------------------------------------------------
 
-    def _run(self) -> None:
+    def _run(self, *, auto: bool = False) -> None:
         c = self.controller
         if c.video is None or c.log is None:
             return
-        _PLOT_DIR.mkdir(parents=True, exist_ok=True)
+        # Per-video, under cache/: the plots are regenerated on every run and belong
+        # to this clip, so they live and die with the rest of its derived files.
+        self._plot_dir = ensure_cache_dir_for(c.video) / "plots"
+        self._plot_dir.mkdir(parents=True, exist_ok=True)
         args = argparse.Namespace(
             video=c.video,
             log=c.log,
@@ -202,7 +245,7 @@ class AutosyncTab(QWidget):
             search_min=self.search_min_spin.value() if self.advanced_box.isChecked() else None,
             search_max=self.search_max_spin.value() if self.advanced_box.isChecked() else None,
             write=False,  # the GUI never writes .sync.json on its own
-            plot=_PLOT_DIR,
+            plot=self._plot_dir,
         )
         result_sink: list = []
         self.run_button.setEnabled(False)
@@ -210,7 +253,10 @@ class AutosyncTab(QWidget):
         self.result_label.setText("Running...")
         self.diagnostics_pane.clear_image()
         self.fit_pane.clear_image()
-        self.terminal.write("[autosync] started\n")
+        self.terminal.write(
+            "[autosync] found a cached analysis, loading it automatically\n"
+            if auto else "[autosync] started\n"
+        )
 
         self._worker = CommandWorker(lambda: cmd_autosync(args, result_sink=result_sink), self.terminal, self)
         self._worker.succeeded.connect(lambda _rc: self._on_finished(result_sink))
@@ -234,10 +280,12 @@ class AutosyncTab(QWidget):
         )
         self.use_button.setEnabled(True)
 
-        diagnostics_path = _PLOT_DIR / "autosync_diagnostics.png"
+        if self._plot_dir is None:
+            return
+        diagnostics_path = self._plot_dir / "autosync_diagnostics.png"
         if diagnostics_path.exists():
             self.diagnostics_pane.show_image(diagnostics_path)
-        fit_path = _PLOT_DIR / "autosync_fit.png"
+        fit_path = self._plot_dir / "autosync_fit.png"
         if fit_path.exists():
             self.fit_pane.show_image(fit_path)
 

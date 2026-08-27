@@ -108,15 +108,15 @@ does **not** take them: it computes the sync instead of receiving it.
   above and needs one of them present. Not to be confused with `export`'s `--scale`,
   which downscales the output frame.
 
-When none of them is given, `frame` and `export` fall back to the video's `.sync.json`,
-and to `0` / `1.0` if there is no such file. `manualsync` has no fallback: it requires
+When none of them is given, `frame` and `export` fall back to the video's saved sync
+(see [Cache](#cache)), and to `0` / `1.0` if there is no such file. `manualsync` has no fallback: it requires
 `--log-delay` or the anchor pair.
 
 `--save-sync` is accepted by `frame` and `export` only. It writes the log delay and
 scale in effect — whether given on the command line or read back from an existing file —
-to `<video>.sync.json`, next to the **video**, whatever the log is called. If they came
-from the anchor pair, both timestamps are stored too, so the file stays readable and
-re-editable.
+to the **video**'s `sync.json` under `cache/` (see [Cache](#cache)), whatever the log is
+called. If they came from the anchor pair, both timestamps are stored too, so the file
+stays readable and re-editable.
 
 ### `probe` — see what you have
 
@@ -209,8 +209,8 @@ telemetry-overlay autosync <video> <log> [-p PRESET]
 - `--search-min` / `--search-max SECONDS` — bound the log delay the estimate may return,
   in **log** seconds — the same quantity `probe` reports as "valid log delays". Applied
   to every window.
-- `--write` — store the accepted estimate (log delay **and** scale) in
-  `<video>.sync.json`. Without it, `autosync` only prints the suggestion; nothing is
+- `--write` — store the accepted estimate (log delay **and** scale) in the video's
+  `sync.json` (see [Cache](#cache)). Without it, `autosync` only prints the suggestion; nothing is
   ever written automatically.
 - `--plot DIR` — save `autosync_diagnostics.png` (roll and roll-rate overlay for the
   *whole* analysed `--from`→`--to` span, from the single continuous optical-flow pass —
@@ -268,7 +268,7 @@ telemetry-overlay manualsync <video> <log> [-p PRESET]
   whole video, `0` to its end).
 - `--plot DIR` — directory to save `manualsync_diagnostics.png` in (default: `out`).
 - plus the shared preset and sync options above — with the sync **required** here: there
-  is no `.sync.json` fallback, and no `--save-sync`.
+  is no saved-sync fallback, and no `--save-sync`.
 
 ```powershell
 telemetry-overlay manualsync "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
@@ -354,8 +354,8 @@ minutes away, that difference is the drift. `autosync` fits both quantities at o
 across several windows; alternatively set `--time-scale` by hand and verify at the far
 point.
 
-Save the result next to the video with `--save-sync` (writes `flight.sync.json`, keeping
-the anchor pair alongside the log delay if that is what you used). Later commands pick it
+Save the result with `--save-sync` (writes the video's `sync.json` under `cache/`,
+keeping the anchor pair alongside the log delay if that is what you used). Later commands pick it
 up automatically whenever `--log-delay`, `--anchor-*` and `--time-scale` are all omitted.
 
 The sync file lives apart from the preset on purpose: a preset describes a *look* and is
@@ -419,9 +419,45 @@ Status messages are guaranteed at least one second on screen each. When several 
 in the same millisecond they queue rather than flash by. The boot banner and everything
 logged before arming is hidden by default.
 
-Parsed logs are cached beside the `.bin` as `.overlay-cache.npz`, so only the first read
-costs anything. The cache invalidates itself when the log changes or when the channel
-definitions in `fields.py` are edited.
+Parsed logs are cached, so only the first read costs anything. The cache invalidates
+itself when the log changes or when the channel definitions in `fields.py` are edited.
+See [Cache](#cache) for where it lives.
+
+## Cache
+
+Everything the program computes from a video or a log goes under `cache/` in the repo
+root, one directory per source file (named after the file plus a hash of its full path,
+so two clips with the same name never collide):
+
+| File | What it is |
+|---|---|
+| `telemetry.npz` | the parsed `.bin`, so only the first read costs anything |
+| `roll-rate.npz` | the optical-flow roll rate, the slowest thing here (see below) |
+| `plots/` | diagnostic PNGs the GUI regenerates on every run |
+| `sync.json` | **not cache** — your log delay, see below |
+
+All of it is derived and safe to delete; it is rebuilt on demand. Set
+`TELEMETRY_OVERLAY_CACHE` to put the directory somewhere other than the repo.
+
+**The optical-flow cache fills in as you go.** Its value for a given pair of consecutive
+frames does not depend on the time range you asked for — a range only decides *which*
+pairs get computed. So rather than caching "the analysis of 90–130s", it keeps one array
+covering the whole video plus a record of which entries are real, and every request fills
+only the holes inside it. Analysing 100–115s in Manualsync and then the whole clip in
+Autosync computes 100–115s once, not twice; the same range twice is free; overlapping or
+disjoint ranges in any order never recompute a pair. Measured on the sample footage:
+re-running the same 15s slice went from 18.8s to 0.02s, and widening a cached 100–115s
+slice to 90–130s cost 33% less than computing it from scratch — with a bit-identical
+result.
+
+**`sync.json` lives there but is not cache.** It holds the alignment you set by hand,
+which nothing can recompute, so the GUI's **Clear cache** button and `clear_cache_for()`
+both leave it alone. Alongside the log delay it records two timestamps: `created`, when
+the alignment was first established (kept across later saves), and `updated`, rewritten
+every time the file is saved — the one to check when asking whether a sync is still the
+one you were working on. Files written by older versions, next to the video as
+`<video>.sync.json`, are still read if the new location is empty; the next save moves
+them.
 
 ## About "without re-encoding"
 
@@ -470,7 +506,12 @@ verdict to the terminal, and shows the resulting diagnostic plots inline once th
 finishes -- scroll the mouse wheel over a plot to zoom in, drag to pan, double-click to
 reset. Its **Use this result** button copies the estimated log delay/scale into the
 shared sync -- never applied automatically. Every parameter field has a small "?"
-next to its label; hover it for a description of what that option does.
+next to its label; hover it for a description of what that option does. If the current
+From/To span's optical flow is already fully cached (see [Cache](#cache)) -- most
+commonly because Autosync or Manualsync already analysed it -- opening the tab runs the
+analysis automatically, since a cache hit costs nothing; otherwise the plot area shows
+a placeholder ("Diagnostics plot appears here after a run.") until **Run autosync** is
+clicked.
 Scrubbing decodes on a background thread and is debounced (~60 ms), since a distant
 seek can take a moment and must not freeze the window; the quality selector trims the
 compositing and on-screen scaling cost, not the decode itself.
@@ -497,8 +538,10 @@ other's; **Reset view** re-fits to the video slice's current position at full he
 small "?" next to the plot's "Roll rate" heading explains all three gestures. A
 **Scale** field corrects a drift visible across a longer slice (dragging only ever
 changes the delay, not the scale). **Save diagnostic PNG** writes the current alignment
-to `out/gui/manualsync/` for comparison or documentation, reusing the same plotting
-function the CLI's `manualsync` uses.
+to this video's `cache/` directory for comparison or documentation, reusing the same plotting
+function the CLI's `manualsync` uses. Like Autosync, opening the tab analyses the
+current From/To slice automatically when its optical flow is already cached; otherwise
+the plot shows "No cached analysis yet -- click Analyse."
 
 An **Export** tab burns the overlay into a video file: output path (browsable,
 defaulting to `out/<video>.overlay.mp4`), **From**/**To** (defaulting to the whole

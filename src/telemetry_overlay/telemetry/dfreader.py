@@ -2,8 +2,9 @@
 
 Parsing is done by pymavlink, the parser maintained by the ArduPilot project itself.
 A full log holds hundreds of thousands of messages (187k IMU records in the sample),
-so the decoded result is cached next to the log as a small ``.npz``: re-running an
-export or tweaking the layout then costs nothing.
+so the decoded result is cached as a small ``.npz`` under the repo's ``cache/``
+directory (see :mod:`telemetry_overlay.cache`): re-running an export or tweaking the
+layout then costs nothing.
 
 Time base: log time is ``TimeUS`` in seconds, i.e. time since the flight controller
 booted. It is monotonic and independent of GPS lock, which makes it the right reference
@@ -30,7 +31,6 @@ log = logging.getLogger(__name__)
 #: Cache format version. The channel definitions are fingerprinted separately (see
 #: ``_extraction_signature``) so editing fields.py invalidates caches automatically.
 CACHE_VERSION = 3
-CACHE_SUFFIX = ".overlay-cache.npz"
 
 #: Status texts emitted while booting, before the vehicle can fly. They are dropped by
 #: default: a dozen of them land in the same millisecond and would otherwise occupy the
@@ -59,7 +59,10 @@ _BOOT_MESSAGE_PREFIXES = (
 
 
 def cache_path_for(log_path: Path) -> Path:
-    return Path(str(log_path) + CACHE_SUFFIX)
+    """Where this log's parsed form is cached, under the repo's ``cache/`` tree."""
+    from ..cache import ensure_cache_dir_for
+
+    return ensure_cache_dir_for(log_path) / "telemetry.npz"
 
 
 def read_log(

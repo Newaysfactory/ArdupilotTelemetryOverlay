@@ -20,15 +20,25 @@ a future drift-correction tool needs no format change.
 The sync lives in its own small file per flight, deliberately separate from the preset:
 a preset describes a *look* and is reused across flights, a log delay belongs to one
 video/log pair.
+
+It is stored in the video's ``cache/`` directory to keep the user's media folders
+clean, but it is **not** cache: it holds alignment work done by hand and cannot be
+recomputed, so ``cache.clear_cache_for`` preserves it (see ``cache.PRESERVED_NAMES``).
+Files written by earlier versions, which sat next to the video as ``<video>.sync.json``,
+are still read from there if the new location has nothing.
 """
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
+from .cache import cache_dir_for, ensure_cache_dir_for
+
 SYNC_SUFFIX = ".sync.json"
+SYNC_FILENAME = "sync.json"
 
 
 @dataclass
@@ -44,6 +54,12 @@ class SyncModel:
     anchor_log_time: float | None = None
     #: Free-form note, e.g. how the log delay was found ("autosync", "manual anchor").
     note: str = ""
+    #: When this sync file was first written, ISO 8601 with the local UTC offset.
+    #: Preserved across re-saves -- it dates the alignment work, not the last write.
+    created: str = ""
+    #: When it was last written, same format. Rewritten on every save: this is the
+    #: one to look at when asking "is this alignment still the one I was working on?".
+    updated: str = ""
     source: Path | None = field(default=None, compare=False)
 
     @classmethod
@@ -79,8 +95,13 @@ class SyncModel:
 
     @staticmethod
     def path_for(video: Path) -> Path:
-        """Companion sync file next to the video: ``clip.MP4`` -> ``clip.sync.json``."""
-        return video.with_suffix(SYNC_SUFFIX)
+        """This video's sync file, in its ``cache/`` directory."""
+        return ensure_cache_dir_for(video) / SYNC_FILENAME
+
+    @staticmethod
+    def legacy_path_for(video: Path) -> Path:
+        """Where versions before the ``cache/`` layout kept it: next to the video."""
+        return Path(video).with_suffix(SYNC_SUFFIX)
 
     @classmethod
     def load(cls, path: Path) -> SyncModel:
@@ -93,21 +114,52 @@ class SyncModel:
             anchor_video_time=None if anchor_video_time is None else float(anchor_video_time),
             anchor_log_time=None if anchor_log_time is None else float(anchor_log_time),
             note=str(data.get("note", "")),
+            created=str(data.get("created", "")),
+            updated=str(data.get("updated", "")),
             source=Path(path),
         )
 
     @classmethod
     def load_for(cls, video: Path) -> SyncModel | None:
-        """Load the companion sync file for a video, or ``None`` if absent."""
-        path = cls.path_for(Path(video))
-        return cls.load(path) if path.exists() else None
+        """Load the sync file for a video, or ``None`` if there is none.
+
+        Falls back to the pre-``cache/`` location so an existing alignment is not
+        silently lost; the next save moves it to the new one.
+        """
+        video = Path(video)
+        path = cache_dir_for(video) / SYNC_FILENAME
+        if path.exists():
+            return cls.load(path)
+        legacy = cls.legacy_path_for(video)
+        return cls.load(legacy) if legacy.exists() else None
 
     def save(self, path: Path) -> Path:
         path = Path(path)
-        payload = {"log_delay": self.log_delay, "scale": self.scale, "note": self.note}
+        now = datetime.now().astimezone().isoformat(timespec="seconds")
+        # Keep the original creation stamp when overwriting: it dates when this
+        # alignment was first established, not when it was last written out. The GUI
+        # rebuilds a fresh SyncModel on every drag, so the stamp has to be recovered
+        # from the file on disk rather than assumed to be on the object.
+        created = self.created
+        if not created and path.exists():
+            try:
+                created = str(json.loads(path.read_text(encoding="utf-8")).get("created", ""))
+            except (OSError, ValueError):
+                created = ""
+        self.created = created or now
+        self.updated = now
+
+        payload = {
+            "log_delay": self.log_delay,
+            "scale": self.scale,
+            "note": self.note,
+            "created": self.created,
+            "updated": self.updated,
+        }
         if self.anchor_video_time is not None and self.anchor_log_time is not None:
             payload["anchor_video_time"] = self.anchor_video_time
             payload["anchor_log_time"] = self.anchor_log_time
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         self.source = path
         return path

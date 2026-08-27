@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPainter, QPixmap, QWheelEvent
+from PySide6.QtGui import QColor, QPainter, QPixmap, QWheelEvent
 from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
 
 #: Zoom multiplier per wheel notch, and the range it is clamped to relative to
@@ -40,7 +40,10 @@ class ZoomableImageView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setMinimumSize(320, 200)
-        self.setStyleSheet("background-color: #202020; color: #888; border: none;")
+        # "color" is deliberately not set here: QGraphicsTextItem (the placeholder,
+        # added in _show_placeholder) is painted directly into the scene and does not
+        # pick up the view's stylesheet -- its colour has to be set on the item itself.
+        self.setStyleSheet("background-color: #202020; border: none;")
         self.setToolTip("Scroll to zoom, drag to pan, double-click to reset")
         self._show_placeholder(placeholder)
 
@@ -62,8 +65,19 @@ class ZoomableImageView(QGraphicsView):
     def _show_placeholder(self, text: str) -> None:
         self._scene.clear()
         self._pixmap_item = None
-        self._scene.addText(text)
+        # QGraphicsTextItem ignores the view's stylesheet -- it is painted directly
+        # into the scene, not styled by Qt's CSS cascade -- so without this it
+        # defaults to black text, which is next to invisible on this view's own
+        # dark (#202020) background. Set the colour on the item itself instead.
+        item = self._scene.addText(text)
+        item.setDefaultTextColor(QColor("#aaaaaa"))
         self.resetTransform()
+        # Centre on the text explicitly: a placeholder shown right after a real,
+        # zoomed/panned image (e.g. switching to a video with nothing cached yet)
+        # would otherwise keep the old scroll position, which can leave this small
+        # placeholder entirely outside the viewport -- indistinguishable from a
+        # blank dark rectangle.
+        self.centerOn(item)
 
     # ---- zoom/pan ------------------------------------------------------
 

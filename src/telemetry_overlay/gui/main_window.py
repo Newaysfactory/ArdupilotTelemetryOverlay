@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..cache import cache_dir_for, clear_cache_for
 from ..cli import DEFAULT_PRESET, cmd_probe
 from ..telemetry import read_log
 from .autosync_tab import AutosyncTab
@@ -79,6 +80,16 @@ class MainWindow(QMainWindow):
         )
         self.probe_button.clicked.connect(self._run_probe)
         layout.addWidget(self.probe_button)
+
+        self.clear_cache_button = QPushButton("Clear cache")
+        self.clear_cache_button.setToolTip(
+            "Delete everything computed for the current video and log -- the optical "
+            "flow analysis, the parsed telemetry and the diagnostic plots -- so the "
+            "next run recomputes them from scratch. The sync (log delay) is kept: it "
+            "is work you did by hand, not something that can be recomputed."
+        )
+        self.clear_cache_button.clicked.connect(self._clear_cache)
+        layout.addWidget(self.clear_cache_button)
 
         bar.addWidget(container)
 
@@ -201,6 +212,35 @@ class MainWindow(QMainWindow):
         worker = CommandWorker(lambda: cmd_probe(args), self.terminal, self)
         self._track_worker(worker)
         worker.start()
+
+    def _clear_cache(self) -> None:
+        """Wipe the derived files for the loaded video/log, keeping the sync."""
+        targets = [p for p in (self.controller.video, self.controller.log) if p]
+        if not targets:
+            QMessageBox.information(self, "Clear cache", "Load a video or a log first.")
+            return
+
+        listing = "\n".join(f"  {cache_dir_for(p)}" for p in targets)
+        confirm = QMessageBox.question(
+            self,
+            "Clear cache",
+            "Delete the computed files in:\n\n"
+            f"{listing}\n\n"
+            "The optical flow analysis and the parsed telemetry will be recomputed on "
+            "the next run. Your sync (log delay) is kept.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+
+        removed = clear_cache_for(*targets)
+        if removed:
+            for path in removed:
+                self.terminal.write(f"[cache] removed {path}\n")
+            self.terminal.write(f"[cache] cleared {len(removed)} item(s)\n")
+        else:
+            self.terminal.write("[cache] nothing to clear\n")
 
     # ---- helpers ---------------------------------------------------------
 

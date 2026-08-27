@@ -10,6 +10,9 @@ todo.txt
 out/
 *.sync.json
 
+# Derived, regenerable per-file data (also holds sync.json, which is user data)
+cache/
+
 # Large sample media
 data/*.MP4
 data/*.mp4

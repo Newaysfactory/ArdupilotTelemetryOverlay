@@ -20,11 +20,33 @@ from pathlib import Path
 
 import numpy as np
 
+from .flow_cache import DEFAULT_MERGE_GAP_SECONDS, FlowParams, RollRateCache
 from .telemetry import fields
 from .telemetry.model import TelemetryLog
 from .video.probe import VideoInfo, probe_video
 
 log = logging.getLogger(__name__)
+
+#: Forced on the two diagnostic-plot functions below, regardless of any matplotlib
+#: style/rcParams active in the process (a system-wide dark ``matplotlibrc``, or a
+#: style another part of the app may have set). These are saved PNGs read back by
+#: ``ZoomableImageView`` inside a dark-themed window; without pinning the colours
+#: explicitly, an ambient dark style renders black/dark-grey text and lines on a
+#: dark or transparent background -- readable nowhere.
+_LIGHT_PLOT_STYLE = {
+    "figure.facecolor": "white",
+    "savefig.facecolor": "white",
+    "axes.facecolor": "white",
+    "axes.edgecolor": "black",
+    "axes.labelcolor": "black",
+    "text.color": "black",
+    "xtick.color": "black",
+    "ytick.color": "black",
+    "grid.color": "#b0b0b0",
+    "legend.facecolor": "white",
+    "legend.edgecolor": "black",
+    "legend.labelcolor": "black",
+}
 
 
 @dataclass
@@ -92,14 +114,17 @@ def estimate_log_delay(
     if roll is None or len(roll) < 10:
         return AutoSyncResult(0.0, 0.0, 0.0, 0.0, 0, "the log has no attitude data")
 
-    video_rate, analysed, frames = _video_roll_rate(
+    video_rate, first_pair, analysed, frames = _video_roll_rate(
         Path(video), info, options, progress
     )
     gate = _quality_gate(video_rate, analysed, frames)
     if gate is not None:
         return gate
 
-    return _correlate(video_rate, info, roll, options, analysed, frames)
+    return _correlate(
+        video_rate, info, roll, options, analysed, frames,
+        video_time0=_pair_time(first_pair, info),
+    )
 
 
 def _quality_gate(
@@ -226,7 +251,9 @@ def estimate_sync(
         max_features=options.max_features,
         collect_diagnostics=options.collect_diagnostics,
     )
-    video_rate, analysed, frames = _video_roll_rate(Path(video), info, scan_options, progress)
+    video_rate, first_pair, analysed, frames = _video_roll_rate(
+        Path(video), info, scan_options, progress
+    )
     gate = _quality_gate(video_rate, analysed, frames)
     if gate is not None:
         return SyncFitResult(0.0, 1.0, [], 0.0, 0.0, gate.warning)
@@ -235,7 +262,7 @@ def estimate_sync(
     if options.collect_diagnostics:
         dt_diag = info.frame_interval
         log_times, log_roll, log_rate = _log_roll_signal(roll, dt_diag)
-        video_times = options.start + dt_diag * (1 + np.arange(len(video_rate)))
+        video_times = _pair_times(first_pair, len(video_rate), info)
         diagnostics = AutoSyncDiagnostics(
             video_times=video_times,
             video_roll_rate=video_rate,
@@ -246,8 +273,12 @@ def estimate_sync(
 
     dt = info.frame_interval
     if n_windows == 1:
-        result = _correlate(video_rate, info, roll, scan_options, analysed, frames)
-        windows = [WindowFit(start=options.start, result=result, used=result.trustworthy)]
+        window_start = _pair_time(first_pair, info)
+        result = _correlate(
+            video_rate, info, roll, scan_options, analysed, frames,
+            video_time0=window_start,
+        )
+        windows = [WindowFit(start=window_start, result=result, used=result.trustworthy)]
         return SyncFitResult(
             log_delay=result.log_delay,
             scale=1.0,
@@ -263,7 +294,7 @@ def estimate_sync(
 
     windows = []
     for idx in indices:
-        window_start = options.start + idx * dt
+        window_start = _pair_time(first_pair + idx, info)
         slice_rate = video_rate[idx : idx + length]
         window_options = AutoSyncOptions(
             window=options.window_length,
@@ -277,7 +308,8 @@ def estimate_sync(
         window_analysed = len(slice_rate) * dt
         window_gate = _quality_gate(slice_rate, window_analysed, len(slice_rate))
         result = window_gate or _correlate(
-            slice_rate, info, roll, window_options, window_analysed, len(slice_rate)
+            slice_rate, info, roll, window_options, window_analysed, len(slice_rate),
+            video_time0=window_start,
         )
         windows.append(WindowFit(start=window_start, result=result))
 
@@ -458,48 +490,49 @@ def save_fit_plot(
     import matplotlib.pyplot as plt
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(8, 5))
+    with plt.rc_context(_LIGHT_PLOT_STYLE):
+        fig, ax = plt.subplots(figsize=(8, 5))
 
-    used = [w for w in result.windows if w.used]
-    unused = [w for w in result.windows if not w.used]
-    if unused:
-        ax.scatter(
-            [w.start for w in unused],
-            [w.result.log_delay for w in unused],
-            color="tab:gray",
-            marker="x",
-            label="discarded window",
-        )
-    if used:
-        ax.scatter(
-            [w.start for w in used],
-            [w.result.log_delay for w in used],
-            color="tab:blue",
-            label="trustworthy window",
-        )
-    if len(used) >= 2:
-        starts = np.array([w.start for w in result.windows])
-        lo, hi = float(starts.min()), float(starts.max())
-        xs = np.linspace(lo, hi, 50)
-        ax.plot(
-            xs,
-            result.log_delay + (result.scale - 1.0) * xs,
-            color="tab:orange",
-            label=f"fit (scale={result.scale:.5f})",
-        )
+        used = [w for w in result.windows if w.used]
+        unused = [w for w in result.windows if not w.used]
+        if unused:
+            ax.scatter(
+                [w.start for w in unused],
+                [w.result.log_delay for w in unused],
+                color="tab:gray",
+                marker="x",
+                label="discarded window",
+            )
+        if used:
+            ax.scatter(
+                [w.start for w in used],
+                [w.result.log_delay for w in used],
+                color="tab:blue",
+                label="trustworthy window",
+            )
+        if len(used) >= 2:
+            starts = np.array([w.start for w in result.windows])
+            lo, hi = float(starts.min()), float(starts.max())
+            xs = np.linspace(lo, hi, 50)
+            ax.plot(
+                xs,
+                result.log_delay + (result.scale - 1.0) * xs,
+                color="tab:orange",
+                label=f"fit (scale={result.scale:.5f})",
+            )
 
-    ax.set_title("Per-window log delay vs. video time")
-    ax.set_xlabel("video window start [s]")
-    ax.set_ylabel("estimated log delay [s]")
-    ax.grid(True, alpha=0.3)
-    ax.legend()
+        ax.set_title("Per-window log delay vs. video time")
+        ax.set_xlabel("video window start [s]")
+        ax.set_ylabel("estimated log delay [s]")
+        ax.grid(True, alpha=0.3)
+        ax.legend()
 
-    fig.tight_layout()
-    path = output_dir / filename
-    # 300dpi (vs. matplotlib's 150 default): the GUI's ZoomableImageView lets the
-    # user zoom well past 1:1, and a 150dpi PNG turns visibly blocky under that.
-    fig.savefig(path, dpi=300)
-    plt.close(fig)
+        fig.tight_layout()
+        path = output_dir / filename
+        # 300dpi (vs. matplotlib's 150 default): the GUI's ZoomableImageView lets the
+        # user zoom well past 1:1, and a 150dpi PNG turns visibly blocky under that.
+        fig.savefig(path, dpi=300)
+        plt.close(fig)
     return path
 
 
@@ -530,10 +563,10 @@ def compute_manual_diagnostics(
     if roll is None or len(roll) < 10:
         raise ValueError("the log has no attitude data")
 
-    video_rate, _, _ = _video_roll_rate(Path(video), info, options, progress)
+    video_rate, first_pair, _, _ = _video_roll_rate(Path(video), info, options, progress)
     dt = info.frame_interval
     log_times, log_roll, log_rate = _log_roll_signal(roll, dt)
-    video_times = start + dt * (1 + np.arange(len(video_rate)))
+    video_times = _pair_times(first_pair, len(video_rate), info)
     return AutoSyncDiagnostics(
         video_times=video_times,
         video_roll_rate=video_rate,
@@ -546,33 +579,147 @@ def compute_manual_diagnostics(
 # ---------------------------------------------------------------------------
 
 
+def _pair_time(pair_index: int, info: VideoInfo) -> float:
+    """Video time attributed to one frame pair: the later of its two frames.
+
+    Anchored to the frame index rather than to whatever ``start`` the caller asked
+    for, so a given pair carries the same timestamp no matter which request
+    produced it -- required now that values are cached and reused across requests.
+    """
+    return (pair_index + 1) * info.frame_interval
+
+
+def _pair_times(first_pair: int, count: int, info: VideoInfo) -> np.ndarray:
+    return (first_pair + 1 + np.arange(count)) * info.frame_interval
+
+
+def _pair_range(info: VideoInfo, options: AutoSyncOptions) -> tuple[int, int]:
+    """Inclusive frame-pair index range covered by ``options``' time window."""
+    n_pairs = max(0, info.frame_count - 1)
+    if n_pairs == 0:
+        return 0, -1
+    first = min(max(0, info.frame_index_at(options.start)), n_pairs - 1)
+    span = int(round(options.window * float(info.frame_rate)))
+    return first, min(n_pairs - 1, first + span - 1)
+
+
 def _video_roll_rate(
     path: Path,
     info: VideoInfo,
     options: AutoSyncOptions,
     progress: Callable[[float], None] | None,
-) -> tuple[np.ndarray, float, int]:
-    """Per-frame image rotation rate, in degrees per second."""
+) -> tuple[np.ndarray, int, float, int]:
+    """Per-frame image rotation rate in degrees/second, computing only what is new.
+
+    Returns ``(rate, first_pair, analysed_seconds, frames)``. Values already in the
+    on-disk cache are reused; only the pairs never computed before are decoded (see
+    :mod:`telemetry_overlay.flow_cache`), so overlapping or repeated requests --
+    autosync and manualsync over the same footage, most obviously -- cost nothing
+    the second time.
+    """
+    first, last = _pair_range(info, options)
+    if last < first:
+        return np.array([], dtype=np.float64), first, 0.0, 0
+
+    params = FlowParams(options.analysis_width, options.max_features)
+    cache = RollRateCache.load(path, info, params)
+    merge_gap = int(round(DEFAULT_MERGE_GAP_SECONDS * float(info.frame_rate)))
+    todo = cache.missing_ranges(first, last, merge_gap=merge_gap)
+
+    if todo:
+        missing = sum(b - a + 1 for a, b in todo)
+        log.info(
+            "optical flow: %d of %d frame pairs already cached, computing %d",
+            (last - first + 1) - missing,
+            last - first + 1,
+            missing,
+        )
+        _fill_missing(cache, path, info, options, todo, progress)
+        cache.save()
+    elif progress:
+        progress(1.0)
+
+    rate = cache.slice(first, last)
+    return rate, first, len(rate) * info.frame_interval, len(rate)
+
+
+def flow_is_cached(video: str | Path, info: VideoInfo, start: float, end: float) -> bool:
+    """Whether every optical-flow value for ``[start, end]`` is already on disk.
+
+    Lets a caller (the GUI, on opening a tab) decide whether running the analysis
+    right now would cost nothing -- reading the cache header is cheap, decoding
+    video is not. Uses the same default analysis parameters ``estimate_log_delay``/
+    ``estimate_sync``/``compute_manual_diagnostics`` do, since none of the GUI tabs
+    expose ``analysis_width``/``max_features`` as options.
+    """
+    options = AutoSyncOptions(start=start, window=max(0.0, end - start))
+    first, last = _pair_range(info, options)
+    if last < first:
+        return True
+    params = FlowParams(options.analysis_width, options.max_features)
+    cache = RollRateCache.load(Path(video), info, params)
+    return not cache.missing_ranges(first, last)
+
+
+def _fill_missing(
+    cache: RollRateCache,
+    path: Path,
+    info: VideoInfo,
+    options: AutoSyncOptions,
+    ranges: list[tuple[int, int]],
+    progress: Callable[[float], None] | None,
+) -> None:
+    """Compute and store each missing range, reporting one continuous progress bar."""
+    total = sum(b - a + 1 for a, b in ranges)
+    done = 0
+    for a, b in ranges:
+        count = b - a + 1
+
+        def report(fraction: float, base: int = done, size: int = count) -> None:
+            if progress:
+                progress((base + fraction * size) / total)
+
+        cache.store(a, _compute_pair_range(path, info, a, b, options, report))
+        done += count
+    if progress:
+        progress(1.0)
+
+
+def _compute_pair_range(
+    path: Path,
+    info: VideoInfo,
+    first_pair: int,
+    last_pair: int,
+    options: AutoSyncOptions,
+    progress: Callable[[float], None] | None,
+) -> np.ndarray:
+    """Image rotation for pairs ``[first_pair, last_pair]``, in degrees per second.
+
+    Decodes frames ``first_pair`` through ``last_pair + 1``: pair ``p`` is the
+    rotation between frames ``p`` and ``p + 1``, which makes every pair
+    independently computable and a range filled next to existing data seam-free.
+    """
     import cv2
 
     from .video.reader import FrameReader
 
     scale = options.analysis_width / info.width
-    first = info.frame_index_at(options.start)
-    last = min(
-        info.frame_count - 1,
-        first + int(round(options.window * float(info.frame_rate))),
-    )
-    rates: list[float] = []
+    count = last_pair - first_pair + 1
+    rates = np.full(count, np.nan, dtype=np.float64)
     previous: np.ndarray | None = None
+    produced = 0
     feature_args = {
         "maxCorners": options.max_features,
         "qualityLevel": 0.01,
         "minDistance": 8,
     }
 
+    # A fresh reader per range, deliberately: reusing one container across several
+    # seeks while a Qt event loop runs in the same process is the pathology
+    # documented in CLAUDE.md. Ranges are few and long, so the extra container
+    # opens cost nothing next to the decoding.
     with FrameReader(path, info) as reader:
-        for index in range(first, last + 1):
+        for index in range(first_pair, last_pair + 2):
             try:
                 frame = reader.frame_at_index(index)
             except IndexError:
@@ -585,17 +732,19 @@ def _video_roll_rate(
                 interpolation=cv2.INTER_AREA,
             )
             if previous is not None:
-                rates.append(_rotation_between(cv2, previous, small, feature_args))
+                rates[produced] = _rotation_between(cv2, previous, small, feature_args)
+                produced += 1
             previous = small
             if progress and index % 30 == 0:
-                progress((index - first) / max(1, last - first))
+                progress((index - first_pair) / max(1, count))
 
-    rate = np.asarray(rates, dtype=np.float64) * float(info.frame_rate)
-    # A failed frame pair yields NaN; fill so the correlation stays defined.
-    nans = ~np.isfinite(rate)
+    rates = rates[:produced] * float(info.frame_rate)
+    # A failed frame pair yields NaN; fill so the correlation stays defined. This is
+    # a real result ("nothing trackable here"), so it is cached rather than retried.
+    nans = ~np.isfinite(rates)
     if nans.any():
-        rate[nans] = 0.0
-    return rate, len(rates) * info.frame_interval, len(rates)
+        rates[nans] = 0.0
+    return rates
 
 
 def _rotation_between(cv2, previous, current, feature_args) -> float:
@@ -638,8 +787,19 @@ def _correlate(
     options: AutoSyncOptions,
     analysed: float,
     frames: int,
+    *,
+    video_time0: float,
 ) -> AutoSyncResult:
-    """Slide the log's roll rate against the video's and take the best lag."""
+    """Slide the log's roll rate against the video's and take the best lag.
+
+    ``video_time0`` is the video time of ``video_rate[0]``, and every video-time
+    quantity here is measured from it: the reported log delay, the search-range
+    translation, and the diagnostics' timestamps. It is passed in rather than taken
+    from ``options.start`` because the first sample sits at the *frame* nearest that
+    request, not exactly at it -- a sub-frame difference, but one that used to leave
+    the returned log delay and the plotted timestamps disagreeing by one frame
+    interval.
+    """
     dt = info.frame_interval
     log_times, log_roll, log_rate = _log_roll_signal(roll, dt)
 
@@ -666,9 +826,9 @@ def _correlate(
     # own start so a fixed pair of bounds means the same thing regardless of where in the
     # clip the window sits (needed for windows spread across a clip in `estimate_sync`).
     if options.search_min is not None:
-        lo = options.search_min + options.start
+        lo = options.search_min + video_time0
     if options.search_max is not None:
-        hi = options.search_max + options.start
+        hi = options.search_max + video_time0
     window = (lags >= lo) & (lags <= hi)
     if not window.any():
         return AutoSyncResult(
@@ -687,7 +847,7 @@ def _correlate(
     runner_up = float(np.max(finite)) if finite.size else 0.0
     confidence = peak / runner_up if runner_up > 0 else (peak * 10 if peak > 0 else 0.0)
 
-    log_delay = float(lags[best] - options.start)
+    log_delay = float(lags[best] - video_time0)
     warning = ""
     if peak < 0.35:
         warning = "weak correlation: the estimate is probably meaningless"
@@ -696,7 +856,7 @@ def _correlate(
 
     diagnostics = None
     if options.collect_diagnostics:
-        video_times = options.start + dt * (1 + np.arange(len(video_rate)))
+        video_times = video_time0 + dt * np.arange(len(video_rate))
         diagnostics = AutoSyncDiagnostics(
             video_times=video_times,
             video_roll_rate=video_rate,
@@ -763,49 +923,50 @@ def save_diagnostic_plots(
     import matplotlib.pyplot as plt
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    fig, (ax_roll, ax_rate) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+    with plt.rc_context(_LIGHT_PLOT_STYLE):
+        fig, (ax_roll, ax_rate) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
-    ax_roll.plot(diagnostics.log_times, diagnostics.log_roll, linewidth=0.8)
-    ax_roll.set_title("Log roll")
-    ax_roll.set_ylabel("roll [deg]")
-    ax_roll.grid(True, alpha=0.3)
+        ax_roll.plot(diagnostics.log_times, diagnostics.log_roll, linewidth=0.8)
+        ax_roll.set_title("Log roll")
+        ax_roll.set_ylabel("roll [deg]")
+        ax_roll.grid(True, alpha=0.3)
 
-    ax_rate.plot(
-        diagnostics.log_times,
-        diagnostics.log_roll_rate,
-        linewidth=0.8,
-        color="tab:blue",
-        label="log roll rate",
-    )
-    ax_rate.plot(
-        log_delay + diagnostics.video_times * scale,
-        diagnostics.video_roll_rate,
-        linewidth=0.8,
-        color="tab:orange",
-        label="video roll rate",
-    )
-    ax_rate.set_title("Log vs. video roll rate")
-    ax_rate.set_xlabel("log time [s]")
-    ax_rate.set_ylabel("roll rate [deg/s]")
-    ax_rate.grid(True, alpha=0.3)
-    ax_rate.legend()
-
-    if xlim is not None:
-        ax_rate.set_xlim(xlim)
-        _autoscale_y(ax_roll, [(diagnostics.log_times, diagnostics.log_roll)], xlim)
-        _autoscale_y(
-            ax_rate,
-            [
-                (diagnostics.log_times, diagnostics.log_roll_rate),
-                (log_delay + diagnostics.video_times * scale, diagnostics.video_roll_rate),
-            ],
-            xlim,
+        ax_rate.plot(
+            diagnostics.log_times,
+            diagnostics.log_roll_rate,
+            linewidth=0.8,
+            color="tab:blue",
+            label="log roll rate",
         )
+        ax_rate.plot(
+            log_delay + diagnostics.video_times * scale,
+            diagnostics.video_roll_rate,
+            linewidth=0.8,
+            color="tab:orange",
+            label="video roll rate",
+        )
+        ax_rate.set_title("Log vs. video roll rate")
+        ax_rate.set_xlabel("log time [s]")
+        ax_rate.set_ylabel("roll rate [deg/s]")
+        ax_rate.grid(True, alpha=0.3)
+        ax_rate.legend()
 
-    fig.tight_layout()
-    path = output_dir / filename
-    fig.savefig(path, dpi=300)
-    plt.close(fig)
+        if xlim is not None:
+            ax_rate.set_xlim(xlim)
+            _autoscale_y(ax_roll, [(diagnostics.log_times, diagnostics.log_roll)], xlim)
+            _autoscale_y(
+                ax_rate,
+                [
+                    (diagnostics.log_times, diagnostics.log_roll_rate),
+                    (log_delay + diagnostics.video_times * scale, diagnostics.video_roll_rate),
+                ],
+                xlim,
+            )
+
+        fig.tight_layout()
+        path = output_dir / filename
+        fig.savefig(path, dpi=300)
+        plt.close(fig)
     return path
 
 

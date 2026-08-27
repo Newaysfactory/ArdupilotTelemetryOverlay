@@ -16,6 +16,11 @@ from PySide6.QtCore import Signal
 
 from ..autosync import AutoSyncDiagnostics
 
+#: Shown on the bare axes before any slice has been analysed, or after
+#: ``clear()`` -- the equivalent of ZoomableImageView's placeholder text for
+#: autosync's PNGs, adapted to a live matplotlib canvas instead of an image.
+_EMPTY_PLACEHOLDER = "No cached analysis yet -- click Analyse."
+
 
 class ManualSyncPlot(FigureCanvasQTAgg):
     """Embedded matplotlib canvas: left-drag to align, scroll to zoom, right-drag to rescale."""
@@ -47,8 +52,37 @@ class ManualSyncPlot(FigureCanvasQTAgg):
         self.mpl_connect("motion_notify_event", self._on_motion)
         self.mpl_connect("button_release_event", self._on_release)
         self.mpl_connect("scroll_event", self._on_scroll)
+        # Pinned explicitly rather than left to matplotlib's ambient rcParams: this
+        # canvas sits inside a dark-themed window, and an ambient dark style (e.g. a
+        # system matplotlibrc) would otherwise render dark text on a dark background --
+        # the same failure autosync_diagnostics.png/autosync_fit.png had before their
+        # colours were pinned the same way in autosync.py.
+        figure.patch.set_facecolor("white")
+        self._show_placeholder(_EMPTY_PLACEHOLDER)
 
     # ---- content -------------------------------------------------------
+
+    def _style_axes(self) -> None:
+        self.ax.set_facecolor("white")
+        self.ax.tick_params(colors="black")
+        self.ax.xaxis.label.set_color("black")
+        self.ax.yaxis.label.set_color("black")
+        self.ax.title.set_color("black")
+        for spine in self.ax.spines.values():
+            spine.set_color("black")
+
+    def _show_placeholder(self, text: str) -> None:
+        self.ax.clear()
+        self._style_axes()
+        self.ax.text(
+            0.5, 0.5, text, ha="center", va="center", transform=self.ax.transAxes,
+            color="black",
+        )
+        self.ax.set_xticks([])
+        self.ax.set_yticks([])
+        for spine in self.ax.spines.values():
+            spine.set_visible(False)
+        self.draw_idle()
 
     def set_diagnostics(self, diagnostics: AutoSyncDiagnostics, log_delay: float, scale: float) -> None:
         """Load a freshly analysed slice and (re)draw both traces from scratch."""
@@ -56,6 +90,7 @@ class ManualSyncPlot(FigureCanvasQTAgg):
         self._log_delay = log_delay
         self._scale = scale
         self.ax.clear()
+        self._style_axes()
         self.ax.plot(
             diagnostics.log_times, diagnostics.log_roll_rate, color="tab:blue", label="log roll rate"
         )
@@ -66,7 +101,11 @@ class ManualSyncPlot(FigureCanvasQTAgg):
         self.ax.set_xlabel("log time [s]")
         self.ax.set_ylabel("roll rate [deg/s]")
         self.ax.grid(True, alpha=0.3)
-        self.ax.legend(loc="upper right")
+        legend = self.ax.legend(loc="upper right")
+        legend.get_frame().set_facecolor("white")
+        legend.get_frame().set_edgecolor("black")
+        for text in legend.get_texts():
+            text.set_color("black")
         self.ax.set_xlim(*self._view_around_video_trace())
         self.draw_idle()
 
@@ -82,8 +121,7 @@ class ManualSyncPlot(FigureCanvasQTAgg):
     def clear(self) -> None:
         self._diagnostics = None
         self._video_line = None
-        self.ax.clear()
-        self.draw_idle()
+        self._show_placeholder(_EMPTY_PLACEHOLDER)
 
     def reset_view(self) -> None:
         """Re-fit the view to the video trace's *current* position.

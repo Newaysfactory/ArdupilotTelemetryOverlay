@@ -7,8 +7,6 @@ directly edit the number if the plot didn't exist.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
@@ -19,7 +17,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..autosync import compute_manual_diagnostics, save_diagnostic_plots
+from ..autosync import compute_manual_diagnostics, flow_is_cached, save_diagnostic_plots
+from ..cache import ensure_cache_dir_for
 from ..cli import _progress_bar
 from ..sync import SyncModel
 from .controller import ProjectController
@@ -27,9 +26,6 @@ from .manual_sync_plot import ManualSyncPlot
 from .terminal import TerminalWidget
 from .widgets import field_label, help_icon
 from .workers import CommandWorker
-
-#: Where the GUI asks manualsync to save a diagnostic snapshot, if requested.
-_PLOT_DIR = Path("out") / "gui" / "manualsync"
 
 _PLOT_HELP = (
     "[Left-drag] slide (video) trace to align"
@@ -54,6 +50,9 @@ class ManualsyncTab(QWidget):
         self._diagnostics = None
         self._suppress_sync_feedback = False
         self._suppress_range_feedback = False
+        #: The video the auto-populate-on-open check has already run for -- see
+        #: autosync_tab.py's identical guard for why.
+        self._auto_populate_video = None
 
         self.start_spin = QDoubleSpinBox()
         self.start_spin.setRange(0.0, 1e6)
@@ -127,8 +126,8 @@ class ManualsyncTab(QWidget):
         self.save_button = QPushButton("Save diagnostic PNG")
         self.save_button.setEnabled(False)
         self.save_button.setToolTip(
-            "Saves a snapshot of the current alignment to out/gui/manualsync/, "
-            "for comparison or documentation -- the live plot itself is not a file."
+            "Saves a snapshot of the current alignment to this video's cache "
+            "directory, for comparison or documentation -- the live plot is not a file."
         )
         self.save_button.clicked.connect(self._save_plot)
 
@@ -184,14 +183,50 @@ class ManualsyncTab(QWidget):
             self.scale_spin.blockSignals(False)
             self.plot.update_sync(c.sync.log_delay, c.sync.scale)
 
+        if c.video != self._auto_populate_video:
+            # A different (or newly loaded) video: the previous analysis belonged
+            # to it, so forget it and give the auto-populate check another chance.
+            self._auto_populate_video = c.video
+            self._diagnostics = None
+            self.reset_view_button.setEnabled(False)
+            self.save_button.setEnabled(False)
+            self.status_label.setText("No analysis yet.")
+            self.plot.clear()
+        self._maybe_auto_populate()
+
     def _on_range_edited(self, _value: float) -> None:
         self._suppress_range_feedback = True
         self.controller.set_range(self.start_spin.value(), self.end_spin.value())
         self._suppress_range_feedback = False
 
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt override
+        super().showEvent(event)
+        self._maybe_auto_populate()
+
+    def _maybe_auto_populate(self) -> None:
+        """Run automatically if this exact slice's optical flow is already cached.
+
+        See autosync_tab.py's identical method for the reasoning: a cache hit
+        finishes in milliseconds, so this is no different from the user having
+        just clicked "Analyse" themselves.
+        """
+        c = self.controller
+        if self._worker is not None or self._diagnostics is not None:
+            return
+        if not self.isVisible():
+            return
+        if not (c.video and c.telemetry and c.info):
+            return
+        start, end = self.start_spin.value(), self.end_spin.value()
+        if end <= start:
+            return
+        if not flow_is_cached(c.video, c.info, start, end):
+            return
+        self._run(auto=True)
+
     # ---- running -------------------------------------------------------
 
-    def _run(self) -> None:
+    def _run(self, *, auto: bool = False) -> None:
         c = self.controller
         if c.video is None or c.telemetry is None:
             return
@@ -205,7 +240,10 @@ class ManualsyncTab(QWidget):
         self.save_button.setEnabled(False)
         self.status_label.setStyleSheet("font-weight: bold; color: palette(link);")
         self.status_label.setText("Analysing...")
-        self.terminal.write("[manualsync] started\n")
+        self.terminal.write(
+            "[manualsync] found a cached analysis, loading it automatically\n"
+            if auto else "[manualsync] started\n"
+        )
 
         def analyse():
             return compute_manual_diagnostics(
@@ -272,13 +310,14 @@ class ManualsyncTab(QWidget):
         if self._diagnostics is None:
             return
         c = self.controller
-        _PLOT_DIR.mkdir(parents=True, exist_ok=True)
+        plot_dir = ensure_cache_dir_for(c.video) / "plots"
+        plot_dir.mkdir(parents=True, exist_ok=True)
         start = self.start_spin.value()
         end = self.end_spin.value()
         path = save_diagnostic_plots(
             self._diagnostics,
             c.sync.log_delay,
-            _PLOT_DIR,
+            plot_dir,
             scale=c.sync.scale,
             filename="manualsync_diagnostics.png",
             xlim=(c.sync.log_time(start), c.sync.log_time(end)),
