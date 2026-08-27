@@ -141,7 +141,10 @@ def build_parser() -> argparse.ArgumentParser:
     export = subparsers.add_parser("export", help="write the video with the overlay")
     _add_common(export)
     export.add_argument(
-        "-o", "--output", type=Path, help="default: out/<video stem>.overlay.mp4"
+        "-o",
+        "--output",
+        type=Path,
+        help="default: <video stem>.overlay.mp4, next to the source video",
     )
     export.add_argument(
         "--from", dest="start", type=float, help="trim start, in video seconds"
@@ -485,7 +488,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     log = read_log(args.log, progress=_note)
     preset = Preset.load(args.preset)
     sync = _resolve_sync(args, args.video)
-    output = args.output or Path("out") / (args.video.stem + ".overlay.mp4")
+    output = args.output or args.video.parent / (args.video.stem + ".overlay.mp4")
 
     options = ExportOptions(
         encoder=args.encoder,

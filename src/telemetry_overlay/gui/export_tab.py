@@ -100,7 +100,7 @@ class ExportTab(QWidget):
 
         form = QFormLayout()
         form.addRow(
-            field_label("Output", "Where the rendered video is written. Defaults to out/<video>.overlay.mp4."),
+            field_label("Output", "Where the rendered video is written. Defaults to <video>.overlay.mp4, next to the source video."),
             output_row,
         )
         form.addRow(
@@ -172,7 +172,7 @@ class ExportTab(QWidget):
         self.run_button.setEnabled(ready and self._worker is None)
         if ready and c.info is not None:
             if not self.output_field.text():
-                self.output_field.setText(str(Path("out") / (c.video.stem + ".overlay.mp4")))
+                self.output_field.setText(str(c.video.parent / (c.video.stem + ".overlay.mp4")))
             self.start_spin.setRange(0.0, c.info.duration)
             self.end_spin.setRange(0.0, c.info.duration)
             self._refresh_encoders()
