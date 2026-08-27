@@ -9,6 +9,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -175,6 +176,8 @@ class MainWindow(QMainWindow):
             self.controller.set_preset_path(Path(path))
 
     def load_video(self, path: Path) -> None:
+        self.terminal.write(f"[video] loading {path.name}...\n")
+        QApplication.processEvents()
         try:
             self.controller.set_video(path)
         except Exception as exc:  # noqa: BLE001 - shown to the user, not swallowed
