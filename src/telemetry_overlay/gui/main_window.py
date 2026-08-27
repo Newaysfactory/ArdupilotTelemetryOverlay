@@ -11,15 +11,10 @@ from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
     QMainWindow,
     QMessageBox,
-    QPushButton,
     QSplitter,
     QTabWidget,
-    QToolBar,
     QVBoxLayout,
     QWidget,
 )
@@ -27,11 +22,11 @@ from PySide6.QtWidgets import (
 from ..cache import cache_dir_for, clear_cache_for
 from ..cli import DEFAULT_PRESET, cmd_probe
 from ..telemetry import read_log
-from .autosync_tab import AutosyncTab
+from .align_tab import AlignTab
 from .controller import ProjectController
 from .export_tab import ExportTab
-from .manualsync_tab import ManualsyncTab
 from .preview_tab import PreviewTab
+from .project_header import ProjectHeader
 from .terminal import TerminalWidget
 from .workers import CommandWorker
 
@@ -53,70 +48,32 @@ class MainWindow(QMainWindow):
         self.terminal = TerminalWidget()
         self._workers: list[CommandWorker] = []
 
-        self._build_toolbar()
         self._build_central_widget()
-        self.controller.state_changed.connect(self._refresh_paths)
-        self._refresh_paths()
 
     # ---- layout --------------------------------------------------------
 
-    def _build_toolbar(self) -> None:
-        bar = QToolBar("Project")
-        bar.setMovable(False)
-        self.addToolBar(bar)
-
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(4, 2, 4, 2)
-
-        self.video_field = self._path_row(layout, "Video:", self._browse_video)
-        self.log_field = self._path_row(layout, "Log:", self._browse_log)
-        self.preset_field = self._path_row(layout, "Preset:", self._browse_preset)
-
-        layout.addStretch(1)
-        self.probe_button = QPushButton("Probe")
-        self.probe_button.setToolTip(
-            "Analyse the video and log and print the report to the terminal below "
-            "(equivalent to 'telemetry-overlay probe')"
-        )
-        self.probe_button.clicked.connect(self._run_probe)
-        layout.addWidget(self.probe_button)
-
-        self.clear_cache_button = QPushButton("Clear cache")
-        self.clear_cache_button.setToolTip(
-            "Delete everything computed for the current video and log -- the optical "
-            "flow analysis, the parsed telemetry and the diagnostic plots -- so the "
-            "next run recomputes them from scratch. The sync (log delay) is kept: it "
-            "is work you did by hand, not something that can be recomputed."
-        )
-        self.clear_cache_button.clicked.connect(self._clear_cache)
-        layout.addWidget(self.clear_cache_button)
-
-        bar.addWidget(container)
-
-    def _path_row(self, layout: QHBoxLayout, label: str, on_browse) -> QLineEdit:
-        layout.addWidget(QLabel(label))
-        field = QLineEdit()
-        field.setReadOnly(True)
-        field.setMinimumWidth(220)
-        layout.addWidget(field)
-        button = QPushButton("Browse...")
-        button.clicked.connect(on_browse)
-        layout.addWidget(button)
-        return field
-
     def _build_central_widget(self) -> None:
+        # The header replaces the old toolbar: it carries the same three file
+        # pickers plus Probe/Clear cache, and adds the alignment state that used
+        # to be visible only from inside the tab that produced it.
+        self.header = ProjectHeader(self.controller)
+        self.header.browse_video_requested.connect(self._browse_video)
+        self.header.browse_log_requested.connect(self._browse_log)
+        self.header.browse_preset_requested.connect(self._browse_preset)
+        self.header.probe_requested.connect(self._run_probe)
+        self.header.clear_cache_requested.connect(self._clear_cache)
+
         splitter = QSplitter(Qt.Orientation.Vertical)
 
+        # Numbered, and named for the task rather than the CLI subcommand: the
+        # order is the order the work actually happens in.
         self.tabs = QTabWidget()
+        self.align_tab = AlignTab(self.controller, self.terminal)
+        self.tabs.addTab(self.align_tab, "1 · Align")
         self.preview_tab = PreviewTab(self.controller)
-        self.tabs.addTab(self.preview_tab, "Preview")
-        self.autosync_tab = AutosyncTab(self.controller, self.terminal)
-        self.tabs.addTab(self.autosync_tab, "Autosync")
-        self.manualsync_tab = ManualsyncTab(self.controller, self.terminal)
-        self.tabs.addTab(self.manualsync_tab, "Manualsync")
+        self.tabs.addTab(self.preview_tab, "2 · Preview")
         self.export_tab = ExportTab(self.controller, self.terminal)
-        self.tabs.addTab(self.export_tab, "Export")
+        self.tabs.addTab(self.export_tab, "3 · Export")
         splitter.addWidget(self.tabs)
         splitter.addWidget(self.terminal)
         splitter.setStretchFactor(0, 4)
@@ -125,7 +82,9 @@ class MainWindow(QMainWindow):
         wrapper = QWidget()
         outer = QVBoxLayout(wrapper)
         outer.setContentsMargins(0, 0, 0, 0)
-        outer.addWidget(splitter)
+        outer.setSpacing(0)
+        outer.addWidget(self.header)
+        outer.addWidget(splitter, 1)
         self.setCentralWidget(wrapper)
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
@@ -251,8 +210,3 @@ class MainWindow(QMainWindow):
         """Keep a reference alive until it finishes (an unowned worker would be GC'd)."""
         self._workers.append(worker)
         worker.finished.connect(lambda: self._workers.remove(worker) if worker in self._workers else None)
-
-    def _refresh_paths(self) -> None:
-        self.video_field.setText(str(self.controller.video) if self.controller.video else "")
-        self.log_field.setText(str(self.controller.log) if self.controller.log else "")
-        self.preset_field.setText(str(self.controller.preset_path))

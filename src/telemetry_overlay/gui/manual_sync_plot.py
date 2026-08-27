@@ -19,7 +19,7 @@ from ..autosync import AutoSyncDiagnostics
 #: Shown on the bare axes before any slice has been analysed, or after
 #: ``clear()`` -- the equivalent of ZoomableImageView's placeholder text for
 #: autosync's PNGs, adapted to a live matplotlib canvas instead of an image.
-_EMPTY_PLACEHOLDER = "No cached analysis yet -- click Analyse."
+_EMPTY_PLACEHOLDER = "No analysis yet -- click 'Run auto align'."
 
 
 class ManualSyncPlot(FigureCanvasQTAgg):

@@ -7,6 +7,7 @@ from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QVBoxLayout,
@@ -21,7 +22,7 @@ from ..video.export import _display_size, _scaled_size  # shared on purpose
 from .controller import ProjectController
 from .frame_decode_worker import FrameDecodeWorker
 from .range_slider import RangeSlider
-from .widgets import field_label
+from .widgets import field_label, step_header
 
 #: How long to wait, after the last slider movement, before decoding.
 _DEBOUNCE_MS = 60
@@ -81,7 +82,7 @@ class PreviewTab(QWidget):
         self._duration = 0.0
         self._updating_controls = False
         #: Guards against feeding a range change straight back into the slider
-        #: that just produced it -- same pattern as manualsync_tab's log-delay drag.
+        #: that just produced it -- same pattern as align_tab's log-delay drag.
         self._suppress_range_feedback = False
 
         self.image_label = _ImageLabel()
@@ -119,24 +120,49 @@ class PreviewTab(QWidget):
             field_label(
                 "Timeline",
                 "The needle scrubs the preview frame; the two round handles set the "
-                "From/To range shared with the Autosync/Manualsync/Export tabs. Click "
-                "empty groove to jump the needle there; drag any handle to move it.",
+                "From/To range shared with the Align and Export tabs. Click empty "
+                "groove to jump the needle there; drag any handle to move it.",
             )
         )
-        slider_header.addWidget(self.range_label)
         slider_header.addStretch(1)
+        slider_header.addWidget(self.range_label)
 
         controls = QHBoxLayout()
-        controls.addWidget(self.slider, 1)
+        controls.addWidget(QLabel("At"))
         controls.addWidget(self.time_spin)
-        controls.addWidget(QLabel("Quality:"))
+        controls.addSpacing(16)
+        controls.addWidget(QLabel("Quality"))
         controls.addWidget(self.quality_combo)
+        controls.addStretch(1)
+
+        # The frame is the product, so it takes the space; the controls sit in one
+        # panel underneath rather than scattered across two rows.
+        panel = QFrame()
+        panel.setObjectName("previewControls")
+        panel.setStyleSheet(
+            "QFrame#previewControls { background: palette(alternate-base); "
+            "border: 1px solid palette(mid); border-radius: 6px; }"
+        )
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(14, 10, 14, 12)
+        panel_layout.setSpacing(8)
+        panel_layout.addLayout(slider_header)
+        panel_layout.addWidget(self.slider)
+        panel_layout.addLayout(controls)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(12)
+        layout.addWidget(
+            step_header(
+                "Preview",
+                "The finished frame, composited exactly as the export will render it. "
+                "Scrub around and check the overlay tracks what the video is doing.",
+            )
+        )
         layout.addWidget(self.status_label)
         layout.addWidget(self.image_label, 1)
-        layout.addLayout(slider_header)
-        layout.addLayout(controls)
+        layout.addWidget(panel)
 
         self.setEnabled(False)
         controller.state_changed.connect(self._on_state_changed)

@@ -446,8 +446,8 @@ All of it is derived and safe to delete; it is rebuilt on demand. Set
 frames does not depend on the time range you asked for — a range only decides *which*
 pairs get computed. So rather than caching "the analysis of 90–130s", it keeps one array
 covering the whole video plus a record of which entries are real, and every request fills
-only the holes inside it. Analysing 100–115s in Manualsync and then the whole clip in
-Autosync computes 100–115s once, not twice; the same range twice is free; overlapping or
+only the holes inside it. Analysing 100–115s with `manualsync` and then the whole clip
+with `autosync` computes 100–115s once, not twice; the same range twice is free; overlapping or
 disjoint ranges in any order never recompute a pair. Measured on the sample footage:
 re-running the same 15s slice went from 18.8s to 0.02s, and widening a cached 100–115s
 slice to 90–130s cost 33% less than computing it from scratch — with a bit-identical
@@ -498,66 +498,87 @@ behaviour match the CLI exactly.
 PYTHONPATH=src .venv/bin/python -m telemetry_overlay.gui.app data/flight.MP4 data/flight.bin
 ```
 
-Currently implemented: drag&drop (or **Browse...**) loading of the video, the `.bin`
-log and the preset; a **Probe** button that runs `probe` and prints its report to the
-terminal pane at the bottom of the window, shared by every command the GUI runs; a
-**Preview** tab with a scrub slider, an exact-time field and a **Quality** selector
-(Full / 1/2 / 1/4) showing the overlay composited on the actual video frame, exactly
-like `frame` but live and interactive; and an **Autosync** tab that runs `autosync` in
-the background with the same options as the CLI (from/to, windows, window length, an
-optional advanced search-range limit), prints the exact same per-window table and
-verdict to the terminal, and shows the resulting diagnostic plots inline once the run
-finishes -- scroll the mouse wheel over a plot to zoom in, drag to pan, double-click to
-reset. Its **Use this result** button copies the estimated log delay/scale into the
-shared sync -- never applied automatically. Every parameter field has a small "?"
-next to its label; hover it for a description of what that option does. If the current
-From/To span's optical flow is already fully cached (see [Cache](#cache)) -- most
-commonly because Autosync or Manualsync already analysed it -- opening the tab runs the
-analysis automatically, since a cache hit costs nothing; otherwise the plot area shows
-a placeholder ("Diagnostics plot appears here after a run.") until **Run autosync** is
-clicked.
-Scrubbing decodes on a background thread and is debounced (~60 ms), since a distant
-seek can take a moment and must not freeze the window; the quality selector trims the
+The window is organised as three numbered tabs -- **1 · Align**, **2 · Preview**,
+**3 · Export** -- in the order the work actually happens, above a terminal pane shared
+by every command the GUI runs. Above the tabs sits a project header that stays visible
+whichever tab you are on: the video, log and preset pickers (click one to change it;
+drag&drop works anywhere in the window), a **Probe** button that runs `probe` and
+prints its report to the terminal, a **Clear cache** button, and -- on the second row
+-- the current alignment and the source video's properties.
+
+The alignment shown in that header has three states, and they are the difference
+between guessing and knowing what the export will render:
+
+- `! not aligned yet — run Align` — no alignment established for this video;
+- `● delay ... · drift ... — not saved` — a working alignment that is **not** in
+  `sync.json` yet;
+- `✓ delay ... · drift ...` — matches what is on disk.
+
+### 1 · Align
+
+One tab for one job. It carries both ways of aligning, because they produce the same
+two numbers:
+
+- **Automatic search** — **From**/**To**, **Windows**, **Window length** and an
+  optional advanced search-range limit, then **Run auto align**. This runs the very
+  same `autosync` code the CLI runs, printing the identical per-window table, verdict
+  and progress bar to the terminal.
+- **Current alignment** — the **Log delay** and **Clock drift** fields. Clock drift is
+  `scale` under its own name: alongside the raw factor the GUI shows what it means
+  (`= +1.47 s every 1000 s`), because `1.001467` is impossible to judge on its own.
+  `--time-scale` and the `scale` key in `sync.json` are unchanged, so existing files
+  keep working.
+
+The result is not a static picture: it lands in an interactive **roll rate** plot of
+the log's roll rate (blue, fixed) against the video's (orange), on a shared log-time
+axis. **Left-drag the orange trace** to correct the alignment by hand -- it updates the
+Log delay field live, exactly as if you had typed it. Scroll to zoom the time axis;
+**right-drag up/down rescales the roll-rate axis** (a view change only) for when one
+trace's peaks dwarf the other's; **Reset view** re-fits to the video trace's current
+position. A "?" next to the plot heading explains all three gestures. Beside it, the
+**Window fit** pane shows `autosync_fit.png` when the run used more than one window:
+one point per window, and a straight line through them is the drift.
+
+Running the search and dragging the plot both change the alignment **for this session
+only** -- the preview and the export follow along immediately, but nothing is written
+to disk until you press **Save alignment**, which writes this video's `sync.json`. The
+header's `— not saved` marker tells you when there is work you have not kept.
+**Save diagnostic PNG** writes a snapshot of the current alignment to the video's
+`cache/` directory, reusing the same plotting function the CLI uses.
+
+If the current From/To span's optical flow is already fully cached (see [Cache](#cache))
+the tab runs the analysis by itself when you open it, since a cache hit costs nothing;
+otherwise the plot shows `No analysis yet -- click 'Run auto align'.`
+
+### 2 · Preview
+
+The overlay composited on the actual video frame, exactly like `frame` but live: a
+scrub slider, an exact-time field and a **Quality** selector (Full / 1/2 / 1/4).
+Decoding happens on a background thread and is debounced (~60 ms), since a distant seek
+can take a moment and must not freeze the window; the quality selector trims the
 compositing and on-screen scaling cost, not the decode itself.
 
-The Preview tab's slider carries two extra round handles besides the scrub needle:
-they set the **From**/**To** range, and that range is shared across every tab -- edit
-it on the slider, or on the From/To fields of Autosync, Manualsync or Export, and all
-of them (and the slider) update together. Click empty groove to jump the scrub needle
-there; drag a round handle to move From or To. It defaults to the whole video on load.
+The slider carries two extra round handles besides the scrub needle: they set the
+**From**/**To** range shared with the Align and Export tabs -- edit it here or in
+either tab's fields and everything updates together. Click empty groove to jump the
+needle there; drag a round handle to move From or To. It defaults to the whole video.
 
-A **Manualsync** tab checks (or sets) the alignment by eye: pick a video slice
-(**From**/**To**, defaulting to the whole video), click **Analyse** to run the same
-optical-flow tracking `manualsync` uses (the terminal shows the same progress bar the
-CLI prints), and get
-back an interactive plot of the log's roll rate (blue, fixed) against the video's roll
-rate (orange), both against a shared log-time axis. Unlike autosync's suggestion, this
-one is applied live: **left-drag anywhere on the plot to align the traces** -- it
-shifts the log delay in real time and writes it straight to the shared sync, the same
-live feedback as manually editing the **Log delay** field next to it (arrows nudge it
-0.1s at a time; type an exact value for finer control). Scroll to zoom in on a
-manoeuvre for fine alignment; **right-drag up/down rescales the roll-rate axis**
-(a view change only, not part of the sync) for when one trace's peaks dwarf the
-other's; **Reset view** re-fits to the video slice's current position at full height. A
-small "?" next to the plot's "Roll rate" heading explains all three gestures. A
-**Scale** field corrects a drift visible across a longer slice (dragging only ever
-changes the delay, not the scale). **Save diagnostic PNG** writes the current alignment
-to this video's `cache/` directory for comparison or documentation, reusing the same plotting
-function the CLI's `manualsync` uses. Like Autosync, opening the tab analyses the
-current From/To slice automatically when its optical flow is already cached; otherwise
-the plot shows "No cached analysis yet -- click Analyse."
+### 3 · Export
 
-An **Export** tab burns the overlay into a video file: output path (browsable,
-defaulting to `<video>.overlay.mp4` next to the source video), **From**/**To** (defaulting to the whole
-video), an **Encoder** dropdown populated from the encoders actually usable on this
-machine (`available_encoders()` -- the same hardware-first probing `probe` uses), a
-**Quality** field (blank keeps the encoder's own default), a downscale **Scale** for a
-fast draft export, and **Copy audio**/**Overwrite if it exists** checkboxes. It does not
-go through `cmd_export` -- see the note on the `--scale`/`--time-scale` collision in
+Burns the overlay into a video file: output path (browsable, defaulting to
+`<video>.overlay.mp4` next to the source video), **From**/**To**, an **Encoder**
+dropdown populated from the encoders actually usable on this machine
+(`available_encoders()` -- the same hardware-first probing `probe` uses), a **Quality**
+field (blank keeps the encoder's own default), a **Downscale** factor for a fast draft
+export, and **Copy audio**/**Overwrite if it exists** checkboxes. It does not go
+through `cmd_export` -- see the note on the `--scale`/`--time-scale` collision in
 `cli.py` below -- but calls `export_video()` directly with the current preset and
 shared sync, so the result is identical to running `export` from the CLI with the same
-options. The terminal shows the same `\r`-updated progress bar and the same final
+options. The terminal shows the same ``-updated progress bar and the same final
 summary line (frames, fps, encoder, audio, band coverage, output size) the CLI prints.
+
+Every parameter field has a small "?" next to its label; hover it for a description of
+what that option does.
 
 ## Tests
 

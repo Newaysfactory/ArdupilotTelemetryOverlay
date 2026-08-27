@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -31,7 +30,7 @@ from ..units import format_duration
 from ..video.encoders import available_encoders
 from .controller import ProjectController
 from .terminal import TerminalWidget
-from .widgets import field_label, help_icon
+from .widgets import compact_form, field_label, help_icon, primary_button, step_header
 from .workers import CommandWorker
 
 
@@ -46,7 +45,7 @@ class ExportTab(QWidget):
         self.terminal = terminal
         self._worker: CommandWorker | None = None
         #: Guards against feeding a range change straight back into the field that
-        #: just produced it -- same pattern as manualsync_tab's log-delay drag.
+        #: just produced it -- same pattern as align_tab's log-delay drag.
         self._suppress_range_feedback = False
 
         self.output_field = QLineEdit()
@@ -98,7 +97,7 @@ class ExportTab(QWidget):
         )
         overwrite_row.addStretch(1)
 
-        form = QFormLayout()
+        form = compact_form()
         form.addRow(
             field_label("Output", "Where the rendered video is written. Defaults to <video>.overlay.mp4, next to the source video."),
             output_row,
@@ -137,24 +136,37 @@ class ExportTab(QWidget):
         )
         form.addRow(
             field_label(
-                "Scale",
-                "Downscale factor applied to the output frame, e.g. 0.5 for half "
-                "resolution. Meant for a fast draft export, not the final delivery.",
+                "Downscale",
+                "Resolution factor applied to the output frame, e.g. 0.5 for half "
+                "resolution. Meant for a fast draft export, not the final delivery. "
+                "Unrelated to the clock drift on the Align tab.",
             ),
             self.scale_spin,
         )
         form.addRow("", audio_row)
         form.addRow("", overwrite_row)
 
-        self.run_button = QPushButton("Export")
+        self.run_button = primary_button("Export")
         self.run_button.clicked.connect(self._run)
+        run_row = QHBoxLayout()
+        run_row.addWidget(self.run_button)
+        run_row.addStretch(1)
 
         self.status_label = QLabel("No export yet.")
         self.status_label.setWordWrap(True)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(12)
+        layout.addWidget(
+            step_header(
+                "Export",
+                "Burn the overlay into a new video file. Audio is copied untouched, and "
+                "the alignment shown in the header above is the one that gets rendered.",
+            )
+        )
         layout.addLayout(form)
-        layout.addWidget(self.run_button)
+        layout.addLayout(run_row)
         layout.addWidget(self.status_label)
         layout.addStretch(1)
 
