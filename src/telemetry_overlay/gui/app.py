@@ -8,8 +8,10 @@ import sys
 from pathlib import Path
 
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
+from ..cache import cache_root
+from ..paths import ensure_writable_dir
 from .main_window import MainWindow
 
 ICON_PATH = Path(__file__).resolve().parent / "assets" / "icon.ico"
@@ -39,6 +41,13 @@ def main(argv: list[str] | None = None) -> int:
     # QApplication must exist first.
     app = QApplication(sys.argv[:1])
     app.setWindowIcon(QIcon(str(ICON_PATH)))
+
+    try:
+        ensure_writable_dir(cache_root())
+    except RuntimeError as exc:
+        QMessageBox.critical(None, "Cannot start", str(exc))
+        return 1
+
     window = MainWindow()
 
     if args.preset is not None:

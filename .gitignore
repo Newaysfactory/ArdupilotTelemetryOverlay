@@ -10,6 +10,10 @@ todo.txt
 out/
 *.sync.json
 
+# PyInstaller build output
+build/
+dist/
+
 # Derived, regenerable per-file data (also holds sync.json, which is user data)
 cache/
 

@@ -9,6 +9,7 @@ Tested on Windows 11 and Ubuntu 22.04 LTS.
 
 ## Table of contents
 
+- [Download (no Python required)](#download-no-python-required)
 - [Setup](#setup)
 - [Installation](#installation)
 - [GUI](#gui)
@@ -30,9 +31,35 @@ Tested on Windows 11 and Ubuntu 22.04 LTS.
 - [Re-encoding notes](#re-encoding-notes)
 - [Tests](#tests)
 
+## Download (no Python required)
+
+If you just want to use the GUI and don't want to install Python or any dependency,
+grab a prebuilt package from the [Releases page](../../releases) instead of following
+the rest of this section:
+
+- **Windows** — download `telemetry-overlay-gui-windows.zip`, extract it anywhere, and
+  run `telemetry-overlay-gui.exe` inside the extracted folder.
+- **macOS** — download `telemetry-overlay-gui-macos.dmg`, open it, and drag
+  `TelemetryOverlay.app` into Applications. The app is not notarised by Apple, so the
+  first launch will be blocked by Gatekeeper ("cannot be opened because the developer
+  cannot be verified"): right-click the app, choose **Open**, and confirm once — this is
+  only needed the first time.
+- **Linux** — download `telemetry-overlay-gui-linux.tar.gz`, extract it, and run
+  `./telemetry-overlay-gui` inside the extracted folder. Needs the system OpenGL/xkbcommon
+  libraries Qt depends on (`libgl1`, `libegl1`, `libxkbcommon0`, `libxcb-cursor0` on
+  Debian/Ubuntu — install with `apt-get install` if the app fails to start).
+
+The downloaded package is self-contained: it bundles Python, PySide6, FFmpeg (via PyAV),
+OpenCV and every other dependency. The `cache/` folder it creates on first run lives
+next to the executable (see [Cache](#cache)) — if that folder is read-only (e.g. the app
+sits in `Program Files`), the app tells you at startup and asks you to move it somewhere
+writable, such as your Desktop or Documents folder. The `telemetry-overlay` CLI is not
+included in these packages; use the source install below for that.
+
 ## Setup
 
-Python **3.11 or newer** is required. From the project root:
+Building from source (for the CLI, or for development) needs Python **3.11 or newer**.
+From the project root:
 
 ```bash
 python -m venv .venv
@@ -553,9 +580,11 @@ See [Cache](#cache) for where it lives.
 
 ## Cache
 
-Everything the program computes from a video or a log goes under `cache/` in the repo
-root, one directory per source file (named after the file plus a hash of its full path,
-so two clips with the same name never collide):
+Everything the program computes from a video or a log goes under a `cache/` folder, one
+directory per source file (named after the file plus a hash of its full path, so two
+clips with the same name never collide). That folder lives next to the running program:
+in the repo root when running from source, next to the `.exe`/binary when running a
+downloaded package (see [Download](#download-no-python-required)).
 
 | File | What it is |
 |---|---|
@@ -565,7 +594,7 @@ so two clips with the same name never collide):
 | `sync.json` | **not cache** — your log delay, see below |
 
 All of it is derived and safe to delete; it is rebuilt on demand. Set
-`TELEMETRY_OVERLAY_CACHE` to put the directory somewhere other than the repo.
+`TELEMETRY_OVERLAY_CACHE` to put the directory somewhere other than its default location.
 
 **The optical-flow cache fills in as you go.** Its value for a given pair of consecutive
 frames does not depend on the time range you asked for — a range only decides *which*

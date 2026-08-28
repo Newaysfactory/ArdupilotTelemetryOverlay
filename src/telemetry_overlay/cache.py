@@ -25,10 +25,9 @@ import os
 import shutil
 from pathlib import Path
 
-#: Repo root, resolved the same way ``cli.DEFAULT_PRESET`` resolves ``presets/``.
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+from .paths import executable_dir
 
-#: Override for tests and for anyone who wants the cache off the repo volume.
+#: Override for tests and for anyone who wants the cache off its default volume.
 _ENV_VAR = "TELEMETRY_OVERLAY_CACHE"
 
 #: Files inside a cache directory that :func:`clear_cache_for` must never delete,
@@ -37,9 +36,11 @@ PRESERVED_NAMES = frozenset({"sync.json"})
 
 
 def cache_root() -> Path:
-    """The ``cache/`` directory, overridable via ``TELEMETRY_OVERLAY_CACHE``."""
+    """The ``cache/`` directory: overridable via ``TELEMETRY_OVERLAY_CACHE``,
+    otherwise next to the running executable (the repo root in dev mode, next
+    to the ``.exe``/binary in a packaged build -- see :mod:`telemetry_overlay.paths`)."""
     override = os.environ.get(_ENV_VAR)
-    return Path(override) if override else _REPO_ROOT / "cache"
+    return Path(override) if override else executable_dir() / "cache"
 
 
 def cache_dir_for(source: str | Path) -> Path:

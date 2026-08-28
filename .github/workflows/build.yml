@@ -1,0 +1,85 @@
+name: Build release packages
+
+# Builds the standalone telemetry-overlay-gui executable for Windows, macOS
+# and Linux with PyInstaller (see packaging/telemetry-overlay.spec) and
+# attaches one archive per OS to the GitHub Release. Runs on every tag that
+# looks like a version (v1.0.0) and can also be triggered manually to test
+# the build without cutting a release.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: telemetry-overlay-gui-windows
+          - os: macos-latest
+            artifact_name: telemetry-overlay-gui-macos
+          - os: ubuntu-latest
+            artifact_name: telemetry-overlay-gui-linux
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Linux Qt runtime dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1 libegl1 libxkbcommon0 libxcb-cursor0
+
+      - name: Install project + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
+
+      - name: Build executable
+        run: pyinstaller packaging/telemetry-overlay.spec --noconfirm
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd dist
+          7z a -tzip ../${{ matrix.artifact_name }}.zip telemetry-overlay-gui
+        shell: bash
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          hdiutil create -volname "Telemetry Overlay" -srcfolder "dist/TelemetryOverlay.app" -ov -format UDZO "${{ matrix.artifact_name }}.dmg"
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd dist
+          tar -czf ../${{ matrix.artifact_name }}.tar.gz telemetry-overlay-gui
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            ${{ matrix.artifact_name }}.zip
+            ${{ matrix.artifact_name }}.dmg
+            ${{ matrix.artifact_name }}.tar.gz
+          if-no-files-found: ignore
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ matrix.artifact_name }}.zip
+            ${{ matrix.artifact_name }}.dmg
+            ${{ matrix.artifact_name }}.tar.gz

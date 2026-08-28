@@ -8,13 +8,15 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .cache import cache_root
 from .hud.preset import Preset
+from .paths import bundle_root, ensure_writable_dir
 from .sync import SyncModel
 from .telemetry import read_log
 from .telemetry.model import TelemetryLog
 from .units import format_duration
 
-DEFAULT_PRESET = Path(__file__).resolve().parents[2] / "presets" / "default.json"
+DEFAULT_PRESET = bundle_root() / "presets" / "default.json"
 
 
 # ---------------------------------------------------------------------------
@@ -635,6 +637,7 @@ def main(argv: list[str] | None = None) -> int:
     level = {0: logging.WARNING, 1: logging.INFO}.get(args.verbose, logging.DEBUG)
     logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
     try:
+        ensure_writable_dir(cache_root())
         return int(args.func(args))
     except (
         FileNotFoundError,
