@@ -1,6 +1,15 @@
 .venv/
 .claude/
 __pycache__/
+
+# AI assistant instruction/config files
+CLAUDE.md
+CLAUDE.local.md
+.cursorrules
+.windsurfrules
+.clinerules
+AGENTS.md
+.github/copilot-instructions.md
 *.py[cod]
 .pytest_cache/
 *.npz
