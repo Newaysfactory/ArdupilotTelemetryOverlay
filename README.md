@@ -5,7 +5,14 @@ FPV-style HUD/OSD: airspeed, ground speed, altitude, height above ground, vertic
 speed, battery voltage/current/consumption, throttle, wind direction and speed,
 autopilot status messages and an artificial horizon.
 
-Tested on Windows 11 and Ubuntu 22.04 LTS.
+OS tested: Windows 11 and Ubuntu 22.04 LTS
+Ardupilot logs tested: ArduPlane 4.7.0
+Video files tested: RunCam Thumb Pro 4K
+
+> **Note:** the `notes/` folder is a private git submodule (internal development
+> notes, not needed to use or build the program). If you clone this repo without
+> access to it, it will simply stay empty -- no impact on building, testing or
+> running the app. See [`.gitmodules`](.gitmodules).
 
 ## Table of contents
 
