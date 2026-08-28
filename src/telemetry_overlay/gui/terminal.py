@@ -17,10 +17,60 @@ import sys
 from collections.abc import Iterator
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QTextCursor
-from PySide6.QtWidgets import QPlainTextEdit
+from PySide6.QtGui import QFont, QMouseEvent, QTextCursor
+from PySide6.QtWidgets import QLabel, QPlainTextEdit, QVBoxLayout, QWidget
 
 _SPLIT = re.compile(r"(\r|\n)")
+
+
+class _TerminalTitleBar(QLabel):
+    """Thin header above the terminal; double-click toggles maximise.
+
+    A plain label (not the terminal's own text area) so the double-click
+    gesture never fights with the terminal's normal double-click-to-select-word
+    behaviour.
+    """
+
+    doubleClicked = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setStyleSheet(
+            "color: palette(mid); padding: 2px 4px; background: palette(window);"
+        )
+        self.set_maximized(False)
+
+    def set_maximized(self, maximized: bool) -> None:
+        self.setText(
+            "Terminal — double-click to restore"
+            if maximized
+            else "Terminal — double-click to expand"
+        )
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        self.doubleClicked.emit()
+        super().mouseDoubleClickEvent(event)
+
+
+class TerminalPane(QWidget):
+    """The terminal plus its double-click-to-expand title bar."""
+
+    maximizeToggled = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.title_bar = _TerminalTitleBar()
+        self.title_bar.doubleClicked.connect(self.maximizeToggled)
+        self.terminal = TerminalWidget()
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self.title_bar)
+        layout.addWidget(self.terminal, 1)
+
+    def set_maximized(self, maximized: bool) -> None:
+        self.title_bar.set_maximized(maximized)
 
 
 class TerminalWidget(QPlainTextEdit):

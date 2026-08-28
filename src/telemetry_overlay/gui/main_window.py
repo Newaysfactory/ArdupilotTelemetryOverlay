@@ -27,7 +27,7 @@ from .controller import ProjectController
 from .export_tab import ExportTab
 from .preview_tab import PreviewTab
 from .project_header import ProjectHeader
-from .terminal import TerminalWidget
+from .terminal import TerminalPane
 from .workers import CommandWorker
 
 log = logging.getLogger(__name__)
@@ -45,7 +45,10 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         self.controller = ProjectController(self)
-        self.terminal = TerminalWidget()
+        self.terminal_pane = TerminalPane()
+        self.terminal = self.terminal_pane.terminal
+        self.terminal_pane.maximizeToggled.connect(self._toggle_terminal_maximized)
+        self._terminal_maximized = False
         self._workers: list[CommandWorker] = []
 
         self._build_central_widget()
@@ -75,9 +78,10 @@ class MainWindow(QMainWindow):
         self.export_tab = ExportTab(self.controller, self.terminal)
         self.tabs.addTab(self.export_tab, "3 · Export")
         splitter.addWidget(self.tabs)
-        splitter.addWidget(self.terminal)
+        splitter.addWidget(self.terminal_pane)
         splitter.setStretchFactor(0, 4)
         splitter.setStretchFactor(1, 1)
+        self._splitter = splitter
 
         wrapper = QWidget()
         outer = QVBoxLayout(wrapper)
@@ -86,6 +90,17 @@ class MainWindow(QMainWindow):
         outer.addWidget(self.header)
         outer.addWidget(splitter, 1)
         self.setCentralWidget(wrapper)
+
+    def _toggle_terminal_maximized(self) -> None:
+        """Double-click on the terminal title bar: fill the tab area with it.
+
+        The title bar's own label always says how to get back ("double-click to
+        restore" while maximised), since hiding the tabs alone gives the user no
+        other clue that the terminal isn't just always this big.
+        """
+        self._terminal_maximized = not self._terminal_maximized
+        self.tabs.setVisible(not self._terminal_maximized)
+        self.terminal_pane.set_maximized(self._terminal_maximized)
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
         self.preview_tab.shutdown()
