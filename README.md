@@ -5,6 +5,18 @@ FPV-style HUD/OSD: airspeed, ground speed, altitude, height above ground, vertic
 speed, battery voltage/current/consumption, throttle, wind direction and speed,
 autopilot status messages and an artificial horizon.
 
+![Telemetry burned onto a real aerobatic flight](docs/images/overlay-demo.gif)
+
+
+
+*Exported output, not a mock-up: an aerobatic pass with the HUD burned in.*
+
+<a href="https://www.youtube.com/watch?v=i8Q-RS5BHYM">
+  <img src="https://img.youtube.com/vi/i8Q-RS5BHYM/maxresdefault.jpg" width="280" alt="Watch a full flight with the overlay on YouTube">
+</a>
+
+*[Watch a full flight on YouTube](https://www.youtube.com/watch?v=i8Q-RS5BHYM).*
+
 Video and log are aligned automatically: the program measures the **roll optical flow**
 of the video — how fast the image itself rotates between consecutive frames — and
 correlates it against the roll rate the autopilot recorded, so no clapperboard, no
