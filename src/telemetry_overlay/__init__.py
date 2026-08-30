@@ -6,3 +6,11 @@
 #: tag on GitHub, the installed package and the number shown in the GUI cannot drift
 #: apart. Bump it here, commit, then tag ``v<same number>``.
 __version__ = "0.1.0"
+
+#: Repository home. The GUI's Help link and the documentation URLs are all built from
+#: this one string, so a rename or a move is a single edit here.
+PROJECT_URL = "https://github.com/Newaysfactory/ArdupilotTelemetryOverlay"
+
+#: Shown next to the version in the GUI header. Short on purpose: it shares one line
+#: with the version and the Help link, and it is a credit, not a byline.
+AUTHOR = "A. Arcadipane"

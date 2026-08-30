@@ -50,6 +50,7 @@ Video files tested: RunCam Thumb Pro 4K
   - [Telemetry sources](#telemetry-sources)
   - [Cache](#cache)
   - [Re-encoding notes](#re-encoding-notes)
+  - [Getting help from inside the app](#getting-help-from-inside-the-app)
   - [Versioning and releases](#versioning-and-releases)
   - [Tests](#tests)
 
@@ -821,6 +822,18 @@ If you want the original file left untouched, the alternative is to composite in
 editor. Exporting the HUD alone to a file with an alpha channel is not implemented yet;
 `frame --overlay-only` produces single transparent PNGs today.
 
+### Getting help from inside the app
+
+The header bar's bottom-right corner carries `v0.1.0 · by A. Arcadipane · Help`. **Help**
+opens this README in your browser.
+
+It tries to open the README *of the build you are running* —
+`blob/v<version>/README.md` — so an older package does not describe a GUI you do not
+have. Whether that tag exists is checked once at startup, on a background thread: if the
+tag is missing (a source checkout, an unreleased version) or the machine is offline, the
+link stays on the current README of the default branch. It is always clickable; the tag
+lookup can only make it more specific, never break it.
+
 ### Versioning and releases
 
 The version is written in exactly one place, `src/telemetry_overlay/__init__.py`:
@@ -832,8 +845,8 @@ __version__ = "0.1.0"
 Everything else reads it from there. `pyproject.toml` declares `dynamic = ["version"]`
 and pulls it in through `[tool.setuptools.dynamic]`, so the installed package carries
 the same number; `telemetry-overlay --version` prints it; and the GUI shows it in the
-window title and as a small `v0.1.0` at the right of the header bar, so a user
-reporting a problem can quote the exact build they are running.
+window title, at the right of the header bar and as the first line in its terminal
+pane, so a user reporting a problem can quote the exact build they are running.
 
 The GitHub tag is the one number nothing derives automatically, so the release workflow
 checks it instead: on a `v*` tag, `.github/workflows/build.yml` compares the tag (minus

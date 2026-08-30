@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import __version__
+from .. import AUTHOR, PROJECT_URL, __version__
 from ..cache import cache_dir_for, clear_cache_for
 from ..cli import DEFAULT_PRESET, cmd_probe
 from ..telemetry import read_log
@@ -55,6 +55,13 @@ class MainWindow(QMainWindow):
         self._workers: list[CommandWorker] = []
 
         self._build_central_widget()
+
+        # First line in the terminal, so it also ends up in any output a user
+        # copies out when reporting a problem: which build, and where it came from.
+        self.terminal.write(
+            f"ArduPilot Telemetry Overlay v{__version__} — {AUTHOR} — {PROJECT_URL}\n"
+        )
+        self.header.start_help_link_lookup()
 
     # ---- layout --------------------------------------------------------
 

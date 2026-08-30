@@ -202,3 +202,30 @@ def test_range_slider_set_low_high_is_order_independent(qapp):
     slider.setLowHigh(50.0, 150.0)
     assert slider.low() == pytest.approx(50.0)
     assert slider.high() == pytest.approx(100.0)  # clamped to the slider's maximum
+
+
+def test_help_link_falls_back_to_the_branch_readme_when_the_tag_is_missing(monkeypatch):
+    """A version that was never tagged -- a source checkout, or a build cut from an
+    unreleased bump -- must not send the user to a GitHub 404. The tagged README is
+    an upgrade over the branch README, never a replacement that can fail."""
+    from telemetry_overlay.gui import help_links
+
+    monkeypatch.setattr(help_links, "tag_exists", lambda version, **kw: False)
+    assert help_links.resolve_readme_url("0.9.9") == help_links.LATEST_README_URL
+
+    monkeypatch.setattr(help_links, "tag_exists", lambda version, **kw: True)
+    assert help_links.resolve_readme_url("0.9.9") == help_links.tagged_readme_url("0.9.9")
+
+
+def test_tag_lookup_answers_false_instead_of_raising_when_offline(monkeypatch):
+    """The lookup runs on a background thread nobody waits for, so every network
+    failure has to resolve to 'no tag', not to an exception that kills the thread."""
+    import urllib.error
+
+    from telemetry_overlay.gui import help_links
+
+    def boom(*args, **kwargs):
+        raise urllib.error.URLError("no network")
+
+    monkeypatch.setattr(help_links.urllib.request, "urlopen", boom)
+    assert help_links.tag_exists("0.1.0") is False

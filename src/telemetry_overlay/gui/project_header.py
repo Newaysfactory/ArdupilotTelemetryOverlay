@@ -25,8 +25,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import __version__
+from .. import AUTHOR, __version__
 from .controller import ProjectController
+from .help_links import LATEST_README_URL, resolve_readme_url_async
 
 #: Warm colour for the one action here that destroys something, so it does not
 #: read as a peer of the harmless "Probe" next to it.
@@ -64,6 +65,8 @@ class ProjectHeader(QFrame):
     browse_preset_requested = Signal()
     probe_requested = Signal()
     clear_cache_requested = Signal()
+    #: Emitted from the lookup thread; Qt queues it onto the GUI thread.
+    _help_url_resolved = Signal(str)
 
     def __init__(self, controller: ProjectController, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -119,20 +122,53 @@ class ProjectHeader(QFrame):
         self.state_row.setSpacing(16)
         bottom.addLayout(self.state_row, 1)
 
-        version_label = QLabel(f"v{__version__}")
-        version_label.setToolTip(
-            "Version of ArduPilot Telemetry Overlay you are running. Quote it when "
-            "reporting a problem; it matches the release tag on GitHub."
+        # Version, credit and Help on one quiet line. Help is a plain rich-text
+        # anchor with setOpenExternalLinks: Qt opens the system browser itself, so
+        # there is no click handler to keep in sync with the URL.
+        self._help_url = LATEST_README_URL
+        self.footer_label = QLabel()
+        self.footer_label.setTextFormat(Qt.TextFormat.RichText)
+        self.footer_label.setOpenExternalLinks(True)
+        self.footer_label.setToolTip(
+            "Version of ArduPilot Telemetry Overlay you are running -- quote it when "
+            "reporting a problem, it matches the release tag on GitHub. 'Help' opens "
+            "the documentation in your browser."
         )
-        version_label.setStyleSheet("QLabel { color: palette(mid); font-size: 11px; }")
-        version_label.setAlignment(
+        self.footer_label.setStyleSheet(
+            "QLabel { color: palette(mid); font-size: 11px; }"
+        )
+        self.footer_label.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom
         )
-        bottom.addWidget(version_label)
+        self._refresh_footer()
+        bottom.addWidget(self.footer_label)
         outer.addLayout(bottom)
+
+        self._help_url_resolved.connect(self._set_help_url)
 
         controller.state_changed.connect(self.refresh)
         self.refresh()
+
+    # ---- the footer line ---------------------------------------------------
+
+    def start_help_link_lookup(self) -> None:
+        """Upgrade the Help link to this build's tagged README, if that tag exists.
+
+        Called by the main window rather than from ``__init__`` so that merely
+        constructing a header never touches the network: the check is a startup
+        nicety, not part of building the widget.
+        """
+        resolve_readme_url_async(self._help_url_resolved.emit)
+
+    def _set_help_url(self, url: str) -> None:
+        self._help_url = url
+        self._refresh_footer()
+
+    def _refresh_footer(self) -> None:
+        self.footer_label.setText(
+            f"v{__version__} &nbsp;·&nbsp; by {AUTHOR} &nbsp;·&nbsp; "
+            f'<a href="{self._help_url}">Help</a>'
+        )
 
     def _file_button(self, signal: Signal) -> QPushButton:
         button = QPushButton()
