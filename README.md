@@ -5,6 +5,15 @@ FPV-style HUD/OSD: airspeed, ground speed, altitude, height above ground, vertic
 speed, battery voltage/current/consumption, throttle, wind direction and speed,
 autopilot status messages and an artificial horizon.
 
+Video and log are aligned automatically: the program measures the **roll optical flow**
+of the video — how fast the image itself rotates between consecutive frames — and
+correlates it against the roll rate the autopilot recorded, so no clapperboard, no
+matching timestamps and no manual counting are needed. It stays a suggestion you can
+check and correct by hand, and the alignment can also be done entirely by eye when the
+footage does not lend itself to the automatic search.
+
+![The Preview tab: the HUD composited on a real frame](docs/images/gui-preview.png)
+
 OS tested: Windows 11 and Ubuntu 22.04 LTS
 Ardupilot logs tested: ArduPlane 4.7.0
 Video files tested: RunCam Thumb Pro 4K
@@ -16,33 +25,42 @@ Video files tested: RunCam Thumb Pro 4K
 
 ## Table of contents
 
-- [Download (no Python required)](#download-no-python-required)
-- [Setup](#setup)
-- [Installation](#installation)
-- [GUI](#gui)
-  - [1 · Align](#1--align)
-  - [2 · Preview](#2--preview)
-  - [3 · Export](#3--export)
-- [How to run the command](#how-to-run-the-command)
-- [Commands](#commands)
+- [Download and use prebuilt package](#download-and-use-prebuilt-package)
+  - [1. Download and start the app](#1-download-and-start-the-app)
+  - [2. Load a video and a log](#2-load-a-video-and-a-log)
+  - [3. Align the telemetry with the video](#3-align-the-telemetry-with-the-video)
+  - [4. Check the result in Preview](#4-check-the-result-in-preview)
+  - [5. Export the finished video](#5-export-the-finished-video)
+- [Working with source code](#working-with-source-code)
+  - [Setup](#setup)
+  - [Installation](#installation)
+  - [Running the GUI from source](#running-the-gui-from-source)
+- [Command line interface](#command-line-interface)
+  - [How to run the commands](#how-to-run-the-commands)
   - [Shared options](#shared-options)
   - [`probe` — see what you have](#probe--see-what-you-have)
   - [`frame` — iterate on the look](#frame--iterate-on-the-look)
   - [`autosync` — suggest a log delay and clock-drift scale](#autosync--suggest-a-log-delay-and-clock-drift-scale)
   - [`manualsync` — check a chosen log delay by eye](#manualsync--check-a-chosen-log-delay-by-eye)
   - [`export` — write the final video](#export--write-the-final-video)
-- [Synchronising video and telemetry](#synchronising-video-and-telemetry)
-- [Presets](#presets)
-- [Telemetry sources](#telemetry-sources)
-- [Cache](#cache)
-- [Re-encoding notes](#re-encoding-notes)
-- [Tests](#tests)
+  - [Worked example: from `.bin` and `.mp4` to the finished video](#worked-example-from-bin-and-mp4-to-the-finished-video)
+- [Other technical details](#other-technical-details)
+  - [Synchronising video and telemetry](#synchronising-video-and-telemetry)
+  - [Presets](#presets)
+  - [Telemetry sources](#telemetry-sources)
+  - [Cache](#cache)
+  - [Re-encoding notes](#re-encoding-notes)
+  - [Tests](#tests)
 
-## Download (no Python required)
+## Download and use prebuilt package
 
-If you just want to use the GUI and don't want to install Python or any dependency,
-grab a prebuilt package from the [Releases page](../../releases) instead of following
-the rest of this section:
+This is the easy way: no Python, no installation, nothing to configure. Download one
+file, extract it, and follow the five steps below to turn a flight video and its
+`.bin` log into a video with the telemetry burned in.
+
+### 1. Download and start the app
+
+Grab the package for your system from the [Releases page](../../releases):
 
 - **Windows** — download `telemetry-overlay-gui-windows.zip`, extract it anywhere, and
   run `telemetry-overlay-gui.exe` inside the extracted folder.
@@ -56,19 +74,163 @@ the rest of this section:
   libraries Qt depends on (`libgl1`, `libegl1`, `libxkbcommon0`, `libxcb-cursor0` on
   Debian/Ubuntu — install with `apt-get install` if the app fails to start).
 
-The downloaded package is self-contained: it bundles Python, PySide6, FFmpeg (via PyAV),
-OpenCV and every other dependency. The `cache/` folder it creates on first run lives
-next to the executable (see [Cache](#cache)) — if that folder is read-only (e.g. the app
-sits in `Program Files`), the app tells you at startup and asks you to move it somewhere
-writable, such as your Desktop or Documents folder. The `telemetry-overlay` CLI is not
-included in these packages; use the source install below for that.
+The package is self-contained: it bundles Python, FFmpeg and everything else. Keep it
+somewhere you can write to — your Desktop or Documents folder is fine. If you put it
+in a read-only location such as `Program Files`, the app says so at startup and asks
+you to move it, because it needs to write its `cache/` folder next to itself.
 
-Each package also ships a `sample_data/` folder — one flight video and its matching
-`.bin` log — so you can try the GUI immediately without hunting for your own footage
-first. On Windows and Linux it sits next to the executable, inside the extracted folder;
-on macOS it sits next to `TelemetryOverlay.app` inside the `.dmg`.
+Each package also ships a **`sample_data/` folder** — one short flight video
+(`sampleVideo1.mp4`) and its matching log (`sampleLog1.bin`) — so you can walk through
+the steps below right away, before hunting for your own footage. On Windows and Linux
+it sits next to the executable; on macOS it sits next to `TelemetryOverlay.app` inside
+the `.dmg`.
 
-## Setup
+### 2. Load a video and a log
+
+When it opens, the window is empty and asks for the two files:
+
+![The empty window](docs/images/gui-empty.png)
+
+**Drag the video and the `.bin` log anywhere onto the window** — both at once is fine.
+(If you prefer, click the **Video** and **Log** buttons at the top and pick them from a
+file dialog.) The log takes a few seconds to read the first time and is remembered
+afterwards.
+
+The strip along the top stays visible whatever you are doing: the three files in use,
+a **Probe** button that prints everything the program can tell about them into the
+panel at the bottom, a **Clear cache** button, and — on the second line — the current
+alignment and the video's resolution, frame rate and duration.
+
+The three numbered tabs below are simply the order of the work: **1 · Align**,
+**2 · Preview**, **3 · Export**.
+
+### 3. Align the telemetry with the video
+
+The camera and the flight controller have no idea about each other, and the camera's
+clock cannot be trusted, so the program has to be told which moment in the log matches
+which moment in the video. That is the whole job of this tab, and it is the only step
+that needs any judgement from you.
+
+![The Align tab, after the automatic search](docs/images/gui-align.png)
+
+Press **Run auto align** and wait. The program measures the **roll optical flow** of the
+video — it tracks features from one frame to the next and works out how fast the picture
+itself is rotating — and slides that signal against the roll rate the autopilot recorded
+until the two match. Nothing in the image needs to be readable or staged: the rolling
+motion of the footage *is* the timing signal. The result is only ever a *suggestion*,
+and it says so itself when it is not confident.
+
+Check it on the big plot on the right. The blue trace is what the autopilot recorded,
+the orange one is the roll measured from the video. **When they sit on top of each
+other, the alignment is right** — that is exactly what the screenshot above shows. If
+the orange trace is shifted sideways, **drag it left or right with the mouse** until the
+two line up. Scroll to zoom in on the time axis, drag with the right button to stretch
+the traces vertically, and **Reset view** puts the view back.
+
+**Clock drift** is the second number, next to the log delay. Camera and autopilot clocks
+run at very slightly different speeds, so a video that lines up perfectly at the start
+can be out by a second or two several minutes later. The automatic search measures it
+when the clip is long enough; the plain-language line next to the field
+(`= +1.47 s every 1000 s`) tells you what the number actually means.
+
+The empty **Window fit** panel underneath fills in only when the search used more than
+one window: one dot per window, and the line through them is the clock drift. **Save
+diagnostic PNG** writes a picture of the current alignment to disk if you want to keep
+one.
+
+If you have already analysed this clip once, the tab redoes the analysis by itself when
+you open it — the result is cached, so it costs nothing and there is no button to press.
+
+#### If the automatic search does not work
+
+Optical flow needs textured ground in view and real rolling. Footage of empty sky,
+straight and level cruise, or a gimbal-stabilised camera gives it nothing to correlate,
+and it will honestly report `check it by eye` rather than invent a number. Very short
+clips can also fail simply because they are shorter than one analysis window — try
+setting **Window length** below the length of the clip and **Windows** to `1` (that is
+what the sample video needs).
+
+**You can do the whole alignment by hand, and it is not a fallback of last resort — it
+is the same two numbers, reached a different way.** You are never obliged to accept what
+the automatic search proposes:
+
+- **By dragging the plot.** A search that ends in `check it by eye` still draws both
+  traces — it measured the video's roll perfectly well, it just could not decide *which*
+  of several similar manoeuvres to match it to. That is the case to drag: put the orange
+  trace onto the blue one yourself until the peaks and dips coincide, and the Log delay
+  field updates live as you drag, exactly as if you had typed it. (The plot needs one
+  run to exist at all, since that run is what measures the video's roll; a low-confidence
+  verdict costs you nothing here.)
+- **By typing the numbers.** Type straight into **Log delay** (and **Clock drift** if
+  you know it) and watch the plot and the Preview tab follow. The arrows step the value,
+  which is the quickest way to close the last fraction of a second.
+- **By eye, against the picture.** Pick one moment you can recognise in both — the
+  takeoff rotation, a sharp roll, touchdown — and adjust the log delay until the
+  Preview tab's artificial horizon does at that instant what the video shows the
+  aircraft doing. Raising the log delay moves the overlay *earlier* in the video; see
+  [Synchronising video and telemetry](#synchronising-video-and-telemetry) for the whole
+  rule.
+
+To get clock drift by hand, align at one point near the start and then check a point
+several minutes later: if the second point has slipped, nudge Clock drift until both
+ends hold.
+
+#### Keeping the alignment
+
+When the traces line up, press **Save alignment**. Until you do, the alignment exists
+only for this session — the top of the window tells you which of the three states you
+are in:
+
+- `! not aligned yet — run Align`
+- `● delay ... · drift ... — not saved` — you have an alignment, but closing the window
+  would lose it
+- `✓ delay ... · drift ...` — saved; next time you open this video it comes back by
+  itself
+
+### 4. Check the result in Preview
+
+![The Preview tab](docs/images/gui-preview.png)
+
+This is the finished frame, composited exactly the way the export will render it — so
+what you see here is what you get. Drag the needle along the timeline to scrub through
+the clip and check that the overlay follows what the aircraft is doing: the artificial
+horizon is the giveaway, since a sharp roll shows up half a second of error
+immediately, while speed and altitude change far too slowly to judge.
+
+If something looks off, go back to **1 · Align** and drag the trace a little; the
+preview follows immediately.
+
+The two round handles on the timeline set a **From**/**To** range shared with the
+other two tabs — use them if you only want to work on, or export, part of the clip.
+Click the empty groove to jump the needle there. The **Quality** selector only affects
+this on-screen preview, never the export; drop it to 1/2 or 1/4 if scrubbing feels
+sluggish on a 4K clip.
+
+### 5. Export the finished video
+
+![The Export tab](docs/images/gui-export.png)
+
+Set where the file should go (it defaults to `<your video>.overlay.mp4`, next to the
+original) and press **Export**. Everything else can stay as it is: the program picks
+the fastest encoder your machine actually has, keeps the original resolution, frame
+rate and quality, and copies the sound untouched.
+
+Progress, speed and an estimated time appear in the panel at the bottom, followed by a
+summary line when it finishes.
+
+Two fields worth knowing about:
+
+- **Downscale** — set it to `0.5` or `0.25` for a quick low-resolution draft. Useful to
+  check the whole clip in a fraction of the time before committing to the full-size
+  export.
+- **From**/**To** — the same range as the Preview timeline. Exporting ten seconds first
+  is always a good idea.
+
+Hover the small **?** next to any field for a description of what it does.
+
+## Working with source code
+
+### Setup
 
 Building from source (for the CLI, or for development) needs Python **3.11 or newer**.
 From the project root:
@@ -84,157 +246,81 @@ That pulls in everything, including `matplotlib` (used by the diagnostic plots o
 PyAV bundles a complete FFmpeg build, including the NVENC hardware encoders — `probe`
 reports which of them this machine can actually use.
 
-## Installation
+### Installation
 
 There is no `telemetry-overlay` file in the project root: it is a console script that
-only exists once the package is installed into the virtualenv. Pick one of the two forms
-below — every example in this README writes `telemetry-overlay`, and you substitute
-whichever you chose.
-
-**Installed (recommended).** Install the package once, in editable mode, and the command
-becomes available inside the virtualenv:
+only exists once the package is installed into the virtualenv. Install the package
+once, in editable mode, and both commands become available inside the virtualenv:
 
 ```bash
 .venv/Scripts/python.exe -m pip install -e .      # Windows
 .venv/bin/pip install -e .                        # Linux / macOS
 ```
 
+Running without installing is also possible — see
+[How to run the commands](#how-to-run-the-commands).
 
-
-## GUI
-
-A PySide6 control panel over the CLI commands above, for anyone who would rather drag
-files in and click a button than type flags. It is a thin layer: every action calls the
-same `cmd_probe`/`cmd_autosync`/`export_video`/... code the CLI uses, so its output and
-behaviour match the CLI exactly.
+### Running the GUI from source
 
 ```powershell
 .venv\Scripts\telemetry-overlay-gui.exe                                    # empty, drag files in
-.venv\Scripts\telemetry-overlay-gui.exe "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin"
+.venv\Scripts\telemetry-overlay-gui.exe "sample_data\sampleVideo1.mp4" "sample_data\sampleLog1.bin"
 ```
 
 ```bash
 # Linux / macOS, without installing
-PYTHONPATH=src .venv/bin/python -m telemetry_overlay.gui.app data/flight.MP4 data/flight.bin
+PYTHONPATH=src .venv/bin/python -m telemetry_overlay.gui.app \
+    sample_data/sampleVideo1.mp4 sample_data/sampleLog1.bin
 ```
 
-The window is organised as three numbered tabs -- **1 · Align**, **2 · Preview**,
-**3 · Export** -- in the order the work actually happens, above a terminal pane shared
-by every command the GUI runs. Above the tabs sits a project header that stays visible
-whichever tab you are on: the video, log and preset pickers (click one to change it;
-drag&drop works anywhere in the window), a **Probe** button that runs `probe` and
-prints its report to the terminal, a **Clear cache** button, and -- on the second row
--- the current alignment and the source video's properties.
+The video, log and preset paths are all optional positionals; anything omitted can be
+dragged in afterwards. For what the three tabs do and how to use them, see
+[Download and use prebuilt package](#download-and-use-prebuilt-package) above — the GUI
+is identical whether it was installed from a release or started from source.
 
-The alignment shown in that header has three states, and they are the difference
-between guessing and knowing what the export will render:
+The GUI is a thin layer over the CLI: every action calls the same
+`cmd_probe`/`cmd_autosync`/`export_video`/... code the CLI uses, prints the same text
+into its terminal pane, and writes the same files, so the two never disagree. The one
+exception is the Export tab, which builds `ExportOptions` and calls `export_video()`
+directly instead of going through `cmd_export` — see the note on the
+`--scale`/`--time-scale` collision under [`export`](#export--write-the-final-video).
 
-- `! not aligned yet — run Align` — no alignment established for this video;
-- `● delay ... · drift ... — not saved` — a working alignment that is **not** in
-  `sync.json` yet;
-- `✓ delay ... · drift ...` — matches what is on disk.
+## Command line interface
 
-### 1 · Align
+The command line exposes the same work as the GUI, plus the pieces that only make
+sense in a script: rendering single frames while iterating on a preset, batching
+exports, and inspecting a log without opening a window.
 
-One tab for one job, in two columns: everything you set down the left, everything you
-look at down the right. It carries both ways of aligning, because they produce the same
-two numbers:
+### How to run the commands
 
-- **Automatic search** — **From**/**To**, **Windows**, **Window length** and an
-  optional advanced search-range limit, then **Run auto align**. This runs the very
-  same `autosync` code the CLI runs, printing the identical per-window table, verdict
-  and progress bar to the terminal.
-- **Current alignment** — the **Log delay** and **Clock drift** fields. Clock drift is
-  `scale` under its own name: alongside the raw factor the GUI shows what it means
-  (`= +1.47 s every 1000 s`), because `1.001467` is impossible to judge on its own.
-  `--time-scale` and the `scale` key in `sync.json` are unchanged, so existing files
-  keep working.
-
-The result is not a static picture: it lands in an interactive **roll rate** plot of
-the log's roll rate (blue, fixed) against the video's (orange), on a shared log-time
-axis. **Left-drag the orange trace** to correct the alignment by hand -- it updates the
-Log delay field live, exactly as if you had typed it. Scroll to zoom the time axis;
-**right-drag up/down rescales the roll-rate axis** (a view change only) for when one
-trace's peaks dwarf the other's; **Reset view** re-fits to the video trace's current
-position. A "?" next to the plot heading explains all three gestures. Under it, the
-**Window fit** pane shows `autosync_fit.png` when the run used more than one window:
-one point per window, and a straight line through them is the drift (scroll to zoom,
-drag to pan, double-click to re-fit).
-
-Running the search and dragging the plot both change the alignment **for this session
-only** -- the preview and the export follow along immediately, but nothing is written
-to disk until you press **Save alignment**, which writes this video's `sync.json`. The
-header's `— not saved` marker tells you when there is work you have not kept.
-**Save diagnostic PNG** writes a snapshot of the current alignment to the video's
-`cache/` directory, reusing the same plotting function the CLI uses.
-
-If the current From/To span's optical flow is already fully cached (see [Cache](#cache))
-the tab runs the analysis by itself when you open it, since a cache hit costs nothing;
-otherwise the plot shows `No analysis yet -- click 'Run auto align'.`
-
-### 2 · Preview
-
-The overlay composited on the actual video frame, exactly like `frame` but live: a
-scrub slider, an exact-time field and a **Quality** selector (Full / 1/2 / 1/4).
-Decoding happens on a background thread and is debounced (~60 ms), since a distant seek
-can take a moment and must not freeze the window; the quality selector trims the
-compositing and on-screen scaling cost, not the decode itself.
-
-The slider carries two extra round handles besides the scrub needle: they set the
-**From**/**To** range shared with the Align and Export tabs -- edit it here or in
-either tab's fields and everything updates together. Click empty groove to jump the
-needle there; drag a round handle to move From or To. It defaults to the whole video.
-
-### 3 · Export
-
-Burns the overlay into a video file: output path (browsable, defaulting to
-`<video>.overlay.mp4` next to the source video), **From**/**To**, an **Encoder**
-dropdown populated from the encoders actually usable on this machine
-(`available_encoders()` -- the same hardware-first probing `probe` uses), a **Quality**
-field (blank keeps the encoder's own default), a **Downscale** factor for a fast draft
-export, and **Copy audio**/**Overwrite if it exists** checkboxes. It does not go
-through `cmd_export` -- see the note on the `--scale`/`--time-scale` collision in
-`cli.py` below -- but calls `export_video()` directly with the current preset and
-shared sync, so the result is identical to running `export` from the CLI with the same
-options. The terminal shows the same `
-`-updated progress bar and the same final
-summary line (frames, fps, encoder, audio, band coverage, output size) the CLI prints.
-
-Every parameter field has a small "?" next to its label; hover it for a description of
-what that option does.
-
-## How to run the command
-
-Then, from the project root:
+**Installed.** From the project root:
 
 ```powershell
-.venv\Scripts\telemetry-overlay.exe probe "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin"
+.venv\Scripts\telemetry-overlay.exe probe "sample_data\sampleVideo1.mp4" "sample_data\sampleLog1.bin"
 ```
 
 Activating the venv (`.venv\Scripts\Activate.ps1`, or `source .venv/bin/activate`) lets
-you drop the path and type `telemetry-overlay` directly.
+you drop the path and type `telemetry-overlay` directly. Every example below writes
+just `telemetry-overlay`; substitute whichever form you use.
 
 **Without installing.** Run the package as a module, telling Python where the sources
 are. From the project root:
 
 ```powershell
 $env:PYTHONPATH = "src"
-.venv\Scripts\python.exe -m telemetry_overlay probe "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin"
+.venv\Scripts\python.exe -m telemetry_overlay probe "sample_data\sampleVideo1.mp4" "sample_data\sampleLog1.bin"
 ```
 
 ```bash
 # Linux / macOS equivalent
-PYTHONPATH=src .venv/bin/python -m telemetry_overlay probe data/flight.MP4 data/flight.bin
+PYTHONPATH=src .venv/bin/python -m telemetry_overlay probe \
+    sample_data/sampleVideo1.mp4 sample_data/sampleLog1.bin
 ```
 
 `$env:PYTHONPATH` lasts for the current shell session only, so set it once per terminal.
-Note the quotes: paths containing spaces — like the sample log — need them.
+Note the quotes: paths containing spaces need them.
 
-Some examples below are run against the sample flight in `data/`. Those files are too
-large to keep in git and are not part of a fresh clone: substitute your own video and
-log, the portable `flight.MP4`/`flight.bin` examples show the shape of each command.
-
-## Commands
+The five subcommands:
 
 ```bash
 telemetry-overlay probe      flight.MP4 flight.bin    # what the two files contain
@@ -273,8 +359,8 @@ does **not** take them: it computes the sync instead of receiving it.
   which downscales the output frame.
 
 When none of them is given, `frame` and `export` fall back to the video's saved sync
-(see [Cache](#cache)), and to `0` / `1.0` if there is no such file. `manualsync` has no fallback: it requires
-`--log-delay` or the anchor pair.
+(see [Cache](#cache)), and to `0` / `1.0` if there is no such file. `manualsync` has no
+fallback: it requires `--log-delay` or the anchor pair.
 
 `--save-sync` is accepted by `frame` and `export` only. It writes the log delay and
 scale in effect — whether given on the command line or read back from an existing file —
@@ -300,10 +386,6 @@ telemetry-overlay probe <video> [log]
 ```bash
 telemetry-overlay probe flight.MP4 flight.bin
 telemetry-overlay probe flight.MP4               # video and encoders only
-```
-
-```powershell
-telemetry-overlay probe "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin"
 ```
 
 An encoder marked `no` is simply unavailable here; on a machine without an NVIDIA GPU
@@ -368,14 +450,14 @@ telemetry-overlay autosync <video> <log> [-p PRESET]
   `--windows 1` disables the scale fit, analyses `--from`→`--to` as one slice, and keeps
   `scale` at `1.0`.
 - `--window-length SECONDS` — duration of each window (default `20`). Longer windows
-  correlate more reliably but cost more decode time; the sample video needed `40` to get
+  correlate more reliably but cost more decode time; long 4K footage needed `40` to get
   a confident peak per window.
 - `--search-min` / `--search-max SECONDS` — bound the log delay the estimate may return,
   in **log** seconds — the same quantity `probe` reports as "valid log delays". Applied
   to every window.
 - `--write` — store the accepted estimate (log delay **and** scale) in the video's
-  `sync.json` (see [Cache](#cache)). Without it, `autosync` only prints the suggestion; nothing is
-  ever written automatically.
+  `sync.json` (see [Cache](#cache)). Without it, `autosync` only prints the suggestion;
+  nothing is ever written automatically.
 - `--plot DIR` — save `autosync_diagnostics.png` (roll and roll-rate overlay for the
   *whole* analysed `--from`→`--to` span, from the single continuous optical-flow pass —
   not just the best-scoring window) and, with more than one window, `autosync_fit.png`
@@ -393,18 +475,11 @@ telemetry-overlay autosync flight.MP4 flight.bin --search-min 170 --search-max 4
 telemetry-overlay autosync flight.MP4 flight.bin --search-min 170 --search-max 420 --write
 ```
 
-Against the sample data, using the log window `probe` reported (`171.7` → `415.9`), with
-40 s windows because the default 20 s were too short for a confident peak on this
-footage:
-
-```powershell
-telemetry-overlay autosync "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
-    --window-length 40 --search-min 171.7 --search-max 415.9 --plot out
-```
-
-That found `log_delay 414.057s`, `scale 1.00137` from 3 windows (correlation up to
-`0.98`) spanning 168 s — consistent with the manually-found `414.130` around video time
-100 s, and with the drift that made a fixed offset lose sync by video time 200 s.
+On a 225 s 4K test flight, using the log window `probe` reported (`171.7` → `415.9`) and
+40 s windows because the default 20 s were too short for a confident peak on that
+footage, it found `log_delay 414.057s`, `scale 1.00137` from 3 windows (correlation up
+to `0.98`) spanning 168 s — consistent with the manually-found `414.130` around video
+time 100 s, and with the drift that made a fixed offset lose sync by video time 200 s.
 
 Not every clip correlates this cleanly. On footage with a less distinctive roll signal
 (similar turns repeated throughout, or long calm stretches) the windows may not agree
@@ -434,9 +509,8 @@ telemetry-overlay manualsync <video> <log> [-p PRESET]
 - plus the shared preset and sync options above — with the sync **required** here: there
   is no saved-sync fallback, and no `--save-sync`.
 
-```powershell
-telemetry-overlay manualsync "data\ThumbPW_0024.MP4" "data\2026-08-23 10-23-27.bin" `
-    --from 60 --to 90 --log-delay 206.1
+```bash
+telemetry-overlay manualsync flight.MP4 flight.bin --from 60 --to 90 --log-delay 206.1
 ```
 
 ### `export` — write the final video
@@ -488,7 +562,109 @@ Expect roughly 9 fps at 4K with the software encoder — about 12 minutes for a 
 clip — and far less with NVENC. Always render a short segment before committing to the
 whole flight.
 
-## Synchronising video and telemetry
+> **Known issue.** In `export`, `--scale` (frame downscale) and `--time-scale`
+> (clock drift) both land on `args.scale`, because `--time-scale` is declared with
+> `dest="scale"` and `--scale` gets the same attribute by default. In practice it is
+> almost invisible, since the sync scale always stays close to `1.0`, but do not rely
+> on passing both in the same invocation. The GUI's Export tab sidesteps it entirely by
+> calling `export_video()` directly.
+
+### Worked example: from `.bin` and `.mp4` to the finished video
+
+Using the clip shipped in `sample_data/` — a 12.6 s, 1280x720 flight with its log. Run
+these from the project root.
+
+**1. See what you have.** Always start here: it confirms the two files can be read,
+and prints the range of log delays for which the clip fits inside the log — a sanity
+check on any alignment you find later.
+
+```bash
+telemetry-overlay probe sample_data/sampleVideo1.mp4 sample_data/sampleLog1.bin
+```
+
+```
+video: sampleVideo1.mp4
+  resolution   1280x720  rotation 0°
+  frame rate   30 (30.000 fps, exact fraction)
+  frames       378  duration 12.600s (00:12)
+  codec        h264 / yuvj420p
+  audio        aac @ 48000 Hz (copyable)
+...
+log: sampleLog1.bin
+  window       87.0s -> 180.0s (93.0s of flight controller time)
+  armed at     87.0s
+  video length 12.6s
+  the clip fits inside the log: valid log delays run from 87.0 to 167.4
+```
+
+**2. Find the alignment.** The clip is shorter than one default 20 s analysis window,
+so analyse it as a single window:
+
+```bash
+telemetry-overlay autosync sample_data/sampleVideo1.mp4 sample_data/sampleLog1.bin \
+    --windows 1
+```
+
+```
+analysing 1 window(s) of 20s spread over 0s -> 13s of video (optical flow vs logged roll rate)...
+  tracking [############################] 100.0%
+  estimated log delay: 144.554 s
+  estimated scale    : 1.00000
+  verdict            : looks trustworthy
+```
+
+`144.554` sits inside the `87.0 .. 167.4` range `probe` reported, which is the first
+thing to check. With the default `--windows 6` on a clip this short, most windows
+overlap and only one comes out trustworthy: `autosync` then says `check it by eye`
+instead of fitting a drift it cannot support. On a longer flight, leave the default and
+let it estimate the drift too.
+
+**3. Check it before spending time on an export.** Render one frame at a moment with
+some roll in it and look at the artificial horizon:
+
+```bash
+telemetry-overlay frame sample_data/sampleVideo1.mp4 sample_data/sampleLog1.bin \
+    --at 5 --log-delay 144.554 -o out/check.png
+```
+
+If the horizon disagrees with the picture, nudge `--log-delay` and re-render (see
+[Synchronising video and telemetry](#synchronising-video-and-telemetry) for which way to
+move it), or plot the whole clip's roll rate against the log's with `manualsync`:
+
+```bash
+telemetry-overlay manualsync sample_data/sampleVideo1.mp4 sample_data/sampleLog1.bin \
+    --log-delay 144.554 --plot out
+```
+
+**4. Save the alignment** so later commands pick it up without being told:
+
+```bash
+telemetry-overlay frame sample_data/sampleVideo1.mp4 sample_data/sampleLog1.bin \
+    --at 5 --log-delay 144.554 --save-sync
+```
+
+**5. Export.** With the sync saved, no sync flags are needed:
+
+```bash
+telemetry-overlay export sample_data/sampleVideo1.mp4 sample_data/sampleLog1.bin \
+    -o out/sample_hud.mp4 -y
+```
+
+```
+sampleVideo1.mp4 + sampleLog1.bin -> out\sample_hud.mp4
+  log delay +144.554s   preset default.json
+  378/378 [############################] 100.0% 102.5 fps  eta 00:00
+done: 378 frames in 3.7s (102.5 fps) with h264_nvenc
+  audio copied without re-encoding   overlay bands covered 31.5% of each frame
+  wrote out\sample_hud.mp4 (4.5 MB)
+```
+
+On a full-length 4K flight, add `--from`/`--to` and `--scale 0.5` for a draft pass
+before running the whole thing.
+
+## Other technical details
+
+### Synchronising video and telemetry
 
 The camera clock cannot be trusted — on real footage the MP4 creation time can be off by
 more than a year — so the alignment is explicit:
@@ -522,13 +698,14 @@ across several windows; alternatively set `--time-scale` by hand and verify at t
 point.
 
 Save the result with `--save-sync` (writes the video's `sync.json` under `cache/`,
-keeping the anchor pair alongside the log delay if that is what you used). Later commands pick it
-up automatically whenever `--log-delay`, `--anchor-*` and `--time-scale` are all omitted.
+keeping the anchor pair alongside the log delay if that is what you used). Later commands
+pick it up automatically whenever `--log-delay`, `--anchor-*` and `--time-scale` are all
+omitted.
 
 The sync file lives apart from the preset on purpose: a preset describes a *look* and is
 reused across flights, while a log delay belongs to one video/log pair.
 
-## Presets
+### Presets
 
 `presets/default.json` holds the layout, the theme and the units. Positions are
 normalised to the frame (0..1) and all sizes are fractions of frame height, so a preset
@@ -551,7 +728,7 @@ Two options worth knowing:
   line the artificial horizon up with the real one when the camera does not point along
   the flight path.
 
-## Telemetry sources
+### Telemetry sources
 
 Verified against ArduPlane 4.7. `probe` shows which source each channel actually used.
 
@@ -586,17 +763,13 @@ Status messages are guaranteed at least one second on screen each. When several 
 in the same millisecond they queue rather than flash by. The boot banner and everything
 logged before arming is hidden by default.
 
-Parsed logs are cached, so only the first read costs anything. The cache invalidates
-itself when the log changes or when the channel definitions in `fields.py` are edited.
-See [Cache](#cache) for where it lives.
-
-## Cache
+### Cache
 
 Everything the program computes from a video or a log goes under a `cache/` folder, one
 directory per source file (named after the file plus a hash of its full path, so two
 clips with the same name never collide). That folder lives next to the running program:
 in the repo root when running from source, next to the `.exe`/binary when running a
-downloaded package (see [Download](#download-no-python-required)).
+downloaded package.
 
 | File | What it is |
 |---|---|
@@ -613,11 +786,11 @@ frames does not depend on the time range you asked for — a range only decides 
 pairs get computed. So rather than caching "the analysis of 90–130s", it keeps one array
 covering the whole video plus a record of which entries are real, and every request fills
 only the holes inside it. Analysing 100–115s with `manualsync` and then the whole clip
-with `autosync` computes 100–115s once, not twice; the same range twice is free; overlapping or
-disjoint ranges in any order never recompute a pair. Measured on the sample footage:
-re-running the same 15s slice went from 18.8s to 0.02s, and widening a cached 100–115s
-slice to 90–130s cost 33% less than computing it from scratch — with a bit-identical
-result.
+with `autosync` computes 100–115s once, not twice; the same range twice is free;
+overlapping or disjoint ranges in any order never recompute a pair. Measured on 4K test
+footage: re-running the same 15s slice went from 18.8s to 0.02s, and widening a cached
+100–115s slice to 90–130s cost 33% less than computing it from scratch — with a
+bit-identical result.
 
 **`sync.json` lives there but is not cache.** It holds the alignment you set by hand,
 which nothing can recompute, so the GUI's **Clear cache** button and `clear_cache_for()`
@@ -628,7 +801,7 @@ one you were working on. Files written by older versions, next to the video as
 `<video>.sync.json`, are still read if the new location is empty; the next save moves
 them.
 
-## Re-encoding notes
+### Re-encoding notes
 
 Burning pixels into a picture requires decoding, compositing and encoding the video
 stream: there is no way to avoid re-encoding it. What this tool does instead is keep the
@@ -647,8 +820,7 @@ If you want the original file left untouched, the alternative is to composite in
 editor. Exporting the HUD alone to a file with an alpha channel is not implemented yet;
 `frame --overlay-only` produces single transparent PNGs today.
 
-
-## Tests
+### Tests
 
 ```bash
 .venv/Scripts/python.exe -m pytest tests/ -q
