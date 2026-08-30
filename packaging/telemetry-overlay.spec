@@ -61,10 +61,36 @@ a = Analysis(  # noqa: F821
 )
 pyz = PYZ(a.pure)  # noqa: F821
 
+# Startup splash. Measured on Windows: the *first* launch after extracting the
+# package takes ~17 s before any window appears (the OS has none of the ~390 MB of
+# DLLs cached yet, and the antivirus reads them all), against ~1 s once warm. This
+# is PyInstaller's bootloader splash, drawn by the C bootloader *before* Python
+# starts -- a QSplashScreen could not help here, because it cannot exist until
+# PySide6 itself has been imported, which is most of the wait. The app closes it
+# through pyi_splash as soon as the real window is up (see gui/app.py).
+#
+# PyInstaller does not support the splash on macOS; there the Dock's bouncing icon
+# is the only startup feedback, and it comes from the OS.
+splash = None
+if sys.platform != "darwin":
+    splash = Splash(  # noqa: F821
+        str(ASSETS / "splash.png"),
+        binaries=a.binaries,
+        datas=a.datas,
+        # The artwork already carries the name, version and author, rendered with
+        # QPainter; Tk's own text layer would only add a second, worse-looking
+        # typeface on top of it.
+        text_pos=None,
+        always_on_top=True,
+    )
+
+exe_args = [pyz, a.scripts]
+if splash is not None:
+    exe_args.append(splash)
+exe_args.append([])
+
 exe = EXE(  # noqa: F821
-    pyz,
-    a.scripts,
-    [],
+    *exe_args,
     exclude_binaries=True,
     name="telemetry-overlay-gui",
     debug=False,
@@ -75,10 +101,13 @@ exe = EXE(  # noqa: F821
     icon=icon_file,
 )
 
+coll_args = [exe]
+if splash is not None:
+    coll_args.append(splash.binaries)
+coll_args += [a.binaries, a.datas]
+
 coll = COLLECT(  # noqa: F821
-    exe,
-    a.binaries,
-    a.datas,
+    *coll_args,
     strip=False,
     upx=False,
     name="telemetry-overlay-gui",

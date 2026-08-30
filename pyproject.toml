@@ -19,7 +19,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pyinstaller>=6.0"]
+# pillow: used by scripts/generate_icon.py and scripts/generate_splash.py, and by
+# the release workflow to read the version baked into the splash PNG.
+dev = ["pytest>=8.0", "pyinstaller>=6.0", "pillow>=10.0"]
 
 [project.scripts]
 telemetry-overlay = "telemetry_overlay.cli:main"

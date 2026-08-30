@@ -51,6 +51,7 @@ Video files tested: RunCam Thumb Pro 4K
   - [Cache](#cache)
   - [Re-encoding notes](#re-encoding-notes)
   - [Getting help from inside the app](#getting-help-from-inside-the-app)
+  - [Startup splash](#startup-splash)
   - [Versioning and releases](#versioning-and-releases)
   - [Tests](#tests)
 
@@ -834,6 +835,26 @@ tag is missing (a source checkout, an unreleased version) or the machine is offl
 link stays on the current README of the default branch. It is always clickable; the tag
 lookup can only make it more specific, never break it.
 
+### Startup splash
+
+The packaged app shows a splash screen while it loads. It is worth knowing why the
+wait exists: the **first** launch after extracting the package takes far longer than
+later ones — measured on Windows, about 17 s against about 1 s once warm — because the
+operating system has none of the bundle's ~390 MB of libraries cached yet, and the
+antivirus reads all of them on the way through. Nothing is wrong; the second launch is
+fast.
+
+The splash is drawn by PyInstaller's bootloader, before Python itself starts, so it
+covers the whole wait. **macOS is the exception**: PyInstaller does not support the
+splash there, and the bouncing Dock icon is the startup feedback the system provides.
+
+The artwork is a static PNG, `src/telemetry_overlay/gui/assets/splash.png`, generated
+by `scripts/generate_splash.py` rather than drawn by hand — it reuses the app icon's
+own artwork, so the two cannot drift apart. Nothing is rendered at startup: what the
+file looks like is exactly what the user sees, so opening the PNG in any image viewer
+is enough to preview a change. The version is painted into it, which means it has to be
+re-rendered on every release — see [Versioning and releases](#versioning-and-releases).
+
 ### Versioning and releases
 
 The version is written in exactly one place, `src/telemetry_overlay/__init__.py`:
@@ -854,17 +875,46 @@ the leading `v`) against `__version__` and fails the build if they differ, befor
 anything is compiled or uploaded. A release whose executable reports a different version
 than its tag therefore cannot be published.
 
-Cutting a release:
+#### The splash screen is the one copy that is a picture
+
+The [startup splash](#startup-splash) has the version *painted into the image*, so it
+cannot read `__version__` at runtime the way everything else does: it has to be
+re-rendered whenever the version changes, with
 
 ```bash
-# 1. bump __version__ in src/telemetry_overlay/__init__.py, then
+python scripts/generate_splash.py
+```
+
+which rewrites `src/telemetry_overlay/gui/assets/splash.png` (commit it along with the
+version bump). It is deliberately not regenerated during the packaged build: rendering
+depends on the fonts installed on the machine doing it, and the CI runners for the three
+operating systems do not have the same ones, so an automatic re-render would quietly
+change the design depending on where the build ran.
+
+Forgetting is caught rather than trusted. The generator also records the version it
+baked in the PNG's text metadata, and the release workflow reads that back and fails a
+`v*` build whose splash does not match `__version__`, telling you to re-run the script.
+So a stale splash can cost you a failed build, never a wrong number in front of a user.
+
+#### Cutting a release
+
+```bash
+# 1. bump __version__ in src/telemetry_overlay/__init__.py
+vim src/telemetry_overlay/__init__.py
+
+# 2. re-render the splash so its painted version matches
+python scripts/generate_splash.py
+
+# 3. commit both, tag with exactly the same number, push
 git commit -am "release 0.2.0"
-git tag v0.2.0            # must match __version__ exactly
+git tag v0.2.0
 git push origin main --tags
 ```
 
 The tag triggers the build for Windows, macOS and Linux and attaches the three archives
-to the GitHub Release.
+to the GitHub Release. Both checks — tag against `__version__`, and splash against
+`__version__` — run before anything is compiled, so a mistake in step 1 or 2 fails the
+build in seconds rather than after three full packaging runs.
 
 ### Tests
 

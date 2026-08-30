@@ -34,11 +34,14 @@ CONTENT_FRACTION = 62 / 96
 TILT_DEG = -8.0
 
 
-def _draw_icon(size: int) -> QImage:
-    image = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
-    image.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(image)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+def draw_horizon_tile(painter: QPainter, size: float, *, x: float = 0.0, y: float = 0.0) -> None:
+    """Draw the "Horizon" badge, ``size`` px square, with its top-left at (x, y).
+
+    Split out of :func:`_draw_icon` so the splash screen shows the *same* artwork
+    rather than a second drawing of it that could drift away from the icon.
+    """
+    painter.save()
+    painter.translate(x, y)
 
     # Rounded-square tile filling the whole canvas (radius matches the 22%
     # corner radius used for the preview tiles).
@@ -99,6 +102,15 @@ def _draw_icon(size: int) -> QImage:
     painter.setBrush(GREEN)
     painter.drawEllipse(center, 2.2, 2.2)
 
+    painter.restore()
+
+
+def _draw_icon(size: int) -> QImage:
+    image = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    draw_horizon_tile(painter, size)
     painter.end()
     return image
 

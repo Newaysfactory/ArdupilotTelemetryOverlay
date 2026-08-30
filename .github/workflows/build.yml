@@ -49,6 +49,35 @@ jobs:
             exit 1
           fi
 
+      # The splash artwork has the version painted into it, so it can go stale in a
+      # way nothing else notices -- a user would read the wrong version off the
+      # first screen the app ever shows. generate_splash.py records what it baked
+      # in the PNG's text metadata; compare that instead of trusting the checkout.
+      - name: Check the splash artwork is not stale
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          python -m pip install --quiet "pillow>=10.0"
+          python - <<'PY'
+          import sys
+          from pathlib import Path
+          from PIL import Image
+
+          sys.path.insert(0, "src")
+          from telemetry_overlay import __version__
+
+          png = Path("src/telemetry_overlay/gui/assets/splash.png")
+          with Image.open(png) as image:
+              baked = image.text.get("telemetry-overlay-version")
+          print(f"splash={baked}  __version__={__version__}")
+          if baked != __version__:
+              print(
+                  f"::error::{png} shows version {baked!r}, not {__version__!r}. "
+                  "Re-run scripts/generate_splash.py and commit the result."
+              )
+              raise SystemExit(1)
+          PY
+
       - name: Install Linux Qt runtime dependencies
         if: runner.os == 'Linux'
         run: |
