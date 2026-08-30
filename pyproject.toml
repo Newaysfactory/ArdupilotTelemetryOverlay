@@ -4,7 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "telemetry-overlay"
-version = "0.1.0"
+# Single source of truth: telemetry_overlay.__version__ (see [tool.setuptools.dynamic]
+# below). The release tag is checked against it by .github/workflows/build.yml.
+dynamic = ["version"]
 description = "Burn ArduPilot telemetry onto flight video as an FPV-style HUD/OSD overlay"
 requires-python = ">=3.11"
 dependencies = [
@@ -22,6 +24,9 @@ dev = ["pytest>=8.0", "pyinstaller>=6.0"]
 [project.scripts]
 telemetry-overlay = "telemetry_overlay.cli:main"
 telemetry-overlay-gui = "telemetry_overlay.gui.app:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "telemetry_overlay.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

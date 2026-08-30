@@ -33,6 +33,22 @@ jobs:
         with:
           python-version: "3.11"
 
+      # The tag is the only version number a user ever sees on GitHub, and
+      # telemetry_overlay.__version__ is the only one they see in the GUI. Nothing
+      # derives one from the other, so check them here and refuse to build a
+      # release whose executable would report a different version than its tag.
+      - name: Check the tag matches telemetry_overlay.__version__
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version=$(python -c "import re,pathlib; print(re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('src/telemetry_overlay/__init__.py').read_text()).group(1))")
+          tag="${GITHUB_REF_NAME#v}"
+          echo "tag=$tag  __version__=$version"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::Tag '$GITHUB_REF_NAME' does not match __version__ '$version'. Bump src/telemetry_overlay/__init__.py and re-tag."
+            exit 1
+          fi
+
       - name: Install Linux Qt runtime dependencies
         if: runner.os == 'Linux'
         run: |

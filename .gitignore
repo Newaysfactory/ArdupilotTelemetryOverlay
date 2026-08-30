@@ -30,3 +30,6 @@ cache/
 data/*.MP4
 data/*.mp4
 data/*.bin
+
+# Other
+todo.txt

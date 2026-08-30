@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import __version__
 from .controller import ProjectController
 
 #: Warm colour for the one action here that destroys something, so it does not
@@ -109,9 +110,26 @@ class ProjectHeader(QFrame):
         outer.addLayout(files)
 
         # ---- row 2: the derived state -------------------------------------
+        # The state row is torn down and rebuilt on every refresh, so the version
+        # label sits beside it rather than inside it: it never changes, and it must
+        # not be rebuilt (or forgotten) along with the chips.
+        bottom = QHBoxLayout()
+        bottom.setSpacing(16)
         self.state_row = QHBoxLayout()
         self.state_row.setSpacing(16)
-        outer.addLayout(self.state_row)
+        bottom.addLayout(self.state_row, 1)
+
+        version_label = QLabel(f"v{__version__}")
+        version_label.setToolTip(
+            "Version of ArduPilot Telemetry Overlay you are running. Quote it when "
+            "reporting a problem; it matches the release tag on GitHub."
+        )
+        version_label.setStyleSheet("QLabel { color: palette(mid); font-size: 11px; }")
+        version_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom
+        )
+        bottom.addWidget(version_label)
+        outer.addLayout(bottom)
 
         controller.state_changed.connect(self.refresh)
         self.refresh()

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import __version__
 from ..cache import cache_dir_for, clear_cache_for
 from ..cli import DEFAULT_PRESET, cmd_probe
 from ..telemetry import read_log
@@ -40,7 +41,9 @@ LOG_SUFFIXES = {".bin"}
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("ArduPilot Telemetry Overlay")
+        # The title bar is what a user quotes back in a screenshot, so the
+        # version belongs here as well as in the header chip.
+        self.setWindowTitle(f"ArduPilot Telemetry Overlay {__version__}")
         self.resize(1280, 800)
         self.setAcceptDrops(True)
 

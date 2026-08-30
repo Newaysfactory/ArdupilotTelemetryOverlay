@@ -50,6 +50,7 @@ Video files tested: RunCam Thumb Pro 4K
   - [Telemetry sources](#telemetry-sources)
   - [Cache](#cache)
   - [Re-encoding notes](#re-encoding-notes)
+  - [Versioning and releases](#versioning-and-releases)
   - [Tests](#tests)
 
 ## Download and use prebuilt package
@@ -819,6 +820,38 @@ loss negligible and the process fast:
 If you want the original file left untouched, the alternative is to composite in a video
 editor. Exporting the HUD alone to a file with an alpha channel is not implemented yet;
 `frame --overlay-only` produces single transparent PNGs today.
+
+### Versioning and releases
+
+The version is written in exactly one place, `src/telemetry_overlay/__init__.py`:
+
+```python
+__version__ = "0.1.0"
+```
+
+Everything else reads it from there. `pyproject.toml` declares `dynamic = ["version"]`
+and pulls it in through `[tool.setuptools.dynamic]`, so the installed package carries
+the same number; `telemetry-overlay --version` prints it; and the GUI shows it in the
+window title and as a small `v0.1.0` at the right of the header bar, so a user
+reporting a problem can quote the exact build they are running.
+
+The GitHub tag is the one number nothing derives automatically, so the release workflow
+checks it instead: on a `v*` tag, `.github/workflows/build.yml` compares the tag (minus
+the leading `v`) against `__version__` and fails the build if they differ, before
+anything is compiled or uploaded. A release whose executable reports a different version
+than its tag therefore cannot be published.
+
+Cutting a release:
+
+```bash
+# 1. bump __version__ in src/telemetry_overlay/__init__.py, then
+git commit -am "release 0.2.0"
+git tag v0.2.0            # must match __version__ exactly
+git push origin main --tags
+```
+
+The tag triggers the build for Windows, macOS and Linux and attaches the three archives
+to the GitHub Release.
 
 ### Tests
 
