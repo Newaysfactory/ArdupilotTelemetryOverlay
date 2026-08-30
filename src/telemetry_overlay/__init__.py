@@ -5,7 +5,7 @@
 #: release workflow refuses to build a ``v*`` tag that does not match it -- so the
 #: tag on GitHub, the installed package and the number shown in the GUI cannot drift
 #: apart. Bump it here, commit, then tag ``v<same number>``.
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 
 #: Repository home. The GUI's Help link and the documentation URLs are all built from
 #: this one string, so a rename or a move is a single edit here.
