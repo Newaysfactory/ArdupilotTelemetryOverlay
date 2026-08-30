@@ -57,7 +57,10 @@ jobs:
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
-          hdiutil create -volname "Telemetry Overlay" -srcfolder "dist/TelemetryOverlay.app" -ov -format UDZO "${{ matrix.artifact_name }}.dmg"
+          mkdir dmg_staging
+          cp -R "dist/TelemetryOverlay.app" dmg_staging/
+          cp -R sample_data dmg_staging/
+          hdiutil create -volname "Telemetry Overlay" -srcfolder "dmg_staging" -ov -format UDZO "${{ matrix.artifact_name }}.dmg"
 
       - name: Package (Linux)
         if: runner.os == 'Linux'

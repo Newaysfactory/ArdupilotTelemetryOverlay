@@ -63,6 +63,11 @@ sits in `Program Files`), the app tells you at startup and asks you to move it s
 writable, such as your Desktop or Documents folder. The `telemetry-overlay` CLI is not
 included in these packages; use the source install below for that.
 
+Each package also ships a `sample_data/` folder — one flight video and its matching
+`.bin` log — so you can try the GUI immediately without hunting for your own footage
+first. On Windows and Linux it sits next to the executable, inside the extracted folder;
+on macOS it sits next to `TelemetryOverlay.app` inside the `.dmg`.
+
 ## Setup
 
 Building from source (for the CLI, or for development) needs Python **3.11 or newer**.

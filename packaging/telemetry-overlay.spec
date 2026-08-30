@@ -12,6 +12,7 @@ active:
 Output lands in ``dist/telemetry-overlay-gui/``.
 """
 
+import shutil
 import sys
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from PyInstaller.utils.hooks import collect_all
 REPO_ROOT = Path(SPECPATH).resolve().parent  # noqa: F821 -- injected by PyInstaller
 SRC = REPO_ROOT / "src"
 ASSETS = SRC / "telemetry_overlay" / "gui" / "assets"
+SAMPLE_DATA = REPO_ROOT / "sample_data"
 
 datas = [
     (str(REPO_ROOT / "presets" / "default.json"), "presets"),
@@ -81,6 +83,17 @@ coll = COLLECT(  # noqa: F821
     upx=False,
     name="telemetry-overlay-gui",
 )
+
+# Plain filesystem copy, not a `datas`/COLLECT TOC entry: PyInstaller 6's
+# onedir layout redirects every TOC-collected file into _internal/
+# regardless of the destination path given, but the sample video+log need
+# to sit next to the exe (not buried in _internal) so a non-technical user
+# can find and try them right away. Runs on every spec invocation, since
+# this is plain script code, not a cached PyInstaller build step.
+sample_data_dest = Path(coll.name) / "sample_data"
+if sample_data_dest.exists():
+    shutil.rmtree(sample_data_dest)
+shutil.copytree(SAMPLE_DATA, sample_data_dest)
 
 if sys.platform == "darwin":
     app = BUNDLE(  # noqa: F821
