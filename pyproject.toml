@@ -1,5 +1,6 @@
 [build-system]
-requires = ["setuptools>=68"]
+# >=77 for PEP 639: the SPDX `license` string and `license-files` below.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,6 +9,11 @@ name = "telemetry-overlay"
 # below). The release tag is checked against it by .github/workflows/build.yml.
 dynamic = ["version"]
 description = "Burn ArduPilot telemetry onto flight video as an FPV-style HUD/OSD overlay"
+# GPLv3 is not only a preference: the distributed bundle carries FFmpeg built with
+# x264/x265, which is GPL, so the combined work has to be. See the License section
+# of README.md.
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "pymavlink>=2.4.42",

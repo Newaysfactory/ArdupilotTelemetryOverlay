@@ -105,6 +105,9 @@ jobs:
           mkdir dmg_staging
           cp -R "dist/TelemetryOverlay.app" dmg_staging/
           cp -R sample_data dmg_staging/
+          # The .app bundle has a fixed internal layout with nowhere a user would
+          # look, so the notices sit beside it in the dmg, like sample_data.
+          cp -R dist/telemetry-overlay-gui/licenses dmg_staging/
           hdiutil create -volname "Telemetry Overlay" -srcfolder "dmg_staging" -ov -format UDZO "${{ matrix.artifact_name }}.dmg"
 
       - name: Package (Linux)

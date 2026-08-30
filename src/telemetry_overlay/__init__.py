@@ -14,3 +14,8 @@ PROJECT_URL = "https://github.com/Newaysfactory/ArdupilotTelemetryOverlay"
 #: Shown next to the version in the GUI header. Short on purpose: it shares one line
 #: with the version and the Help link, and it is a credit, not a byline.
 AUTHOR = "A. Arcadipane"
+
+#: SPDX identifier, shown in the GUI's startup banner. GPLv3 asks an interactive
+#: program to display "Appropriate Legal Notices"; a line the user can actually read
+#: and copy is the cheapest honest way to do that here.
+LICENSE = "GPL-3.0-or-later"

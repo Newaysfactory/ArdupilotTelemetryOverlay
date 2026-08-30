@@ -124,6 +124,15 @@ if sample_data_dest.exists():
     shutil.rmtree(sample_data_dest)
 shutil.copytree(SAMPLE_DATA, sample_data_dest)
 
+# Licence notices, next to the exe for the same reason as sample_data: they have to
+# be findable. GPL and LGPL both require their terms to accompany the binary, and
+# this bundle carries FFmpeg (GPL, via PyAV), Qt and pymavlink (LGPL). Generated
+# rather than checked in, so the notices describe the versions actually built here.
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+import collect_licenses  # noqa: E402 -- path set just above
+
+collect_licenses.build(Path(coll.name) / "licenses")
+
 if sys.platform == "darwin":
     app = BUNDLE(  # noqa: F821
         coll,

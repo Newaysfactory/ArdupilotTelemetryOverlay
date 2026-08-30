@@ -54,6 +54,7 @@ Video files tested: RunCam Thumb Pro 4K
   - [Startup splash](#startup-splash)
   - [Versioning and releases](#versioning-and-releases)
   - [Tests](#tests)
+  - [License](#license)
 
 ## Download and use prebuilt package
 
@@ -915,6 +916,37 @@ The tag triggers the build for Windows, macOS and Linux and attaches the three a
 to the GitHub Release. Both checks — tag against `__version__`, and splash against
 `__version__` — run before anything is compiled, so a mistake in step 1 or 2 fails the
 build in seconds rather than after three full packaging runs.
+
+### License
+
+This program is free software under the **GNU General Public License, version 3 or
+later** — the full text is in [`LICENSE`](LICENSE).
+
+That is not only a preference. The downloadable package has to bundle everything it
+needs to run, and part of what it needs is FFmpeg built with libx264 and libx265,
+which are GPL. The prebuilt packages are therefore a combined work covered by the GPL,
+and licensing this project under the GPL is what keeps the two consistent. Running from
+source is unaffected: pip installs those libraries on your machine, and nothing is
+redistributed.
+
+The packages carry the licences of what they bundle, in a `licenses/` folder next to
+the executable (on macOS, next to `TelemetryOverlay.app` inside the `.dmg`):
+
+- `LICENSE.txt` — this program's GPLv3
+- `THIRD-PARTY-NOTICES.md` — what is bundled, under which licence, and where to get the
+  corresponding source for the GPL parts
+- `third-party/` — the licence texts themselves
+
+That folder is generated at build time by `scripts/collect_licenses.py`, from the
+packages actually present in the build, so it cannot describe a set of versions that
+were never shipped. Two texts are kept in `packaging/licenses/` and added explicitly,
+because the wheels that need them do not carry them: the GPL for the FFmpeg inside the
+`av` wheel (which ships only PyAV's own BSD text), and the LGPL for Qt (whose wheel
+ships only a pointer to the *commercial* licence).
+
+Qt and pymavlink are LGPL, which requires that you be able to replace them with your
+own build. The `onedir` layout is what makes that possible: their libraries are
+ordinary separate files under `_internal/`, not fused into the executable.
 
 ### Tests
 
